@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+# Посмотреть список профилей можно:
+# yt-dlp --cookies-from-browser firefox --print-traffic --simulate https://youtu.be/dQw4w9WgXcQ
+#
+# ls ~/.mozilla/firefox/*.default*/ -d
+# $ ls ~/snap/firefox/common/.mozilla/firefox/
+  #'Crash Reports'  'Pending Pings'  'Profile Groups'   profiles.ini   u5pcadw3.default
+#  $ cat ~/snap/firefox/common/.mozilla/firefox/profiles.ini
+#
+# yt-dlp --cookies-from-browser firefox:"название_профиля" https://youtu.be/-IKk1zzVCmA
+
 echo "===$(date)===" >> /tmp/cron_debug.txt
 whoami >> /tmp/cron_debug.txt
 env >> /tmp/cron_debug.txt
@@ -75,7 +85,7 @@ URLS_BATCH_SIZE=6
 echo ""
 echo "Скачиваем куки в файл $COOKIES_FILE"
 
-./get_cookies.py $COOKIES_FILE
+#./get_cookies.py $COOKIES_FILE
 
 echo "Скачали куки в файл $COOKIES_FILE"
 echo ""
@@ -148,15 +158,15 @@ while IFS= read -r channel_url || [[ -n "$channel_url" ]]; do
     echo ""
 
 
-    if (( index % 4 == 0 )); then
-        # Если остаток от деления на 4 равен 0, значит, число кратно
-        echo "--- Достигнут шаг, кратный 4 (индекс: $index) ---"
-        echo ""
-        echo "Скачиваем куки в файл $COOKIES_FILE"
-        ./get_cookies.py $COOKIES_FILE
-        echo "Скачали куки в файл $COOKIES_FILE"
-        echo ""
-    fi
+#    if (( index % 4 == 0 )); then
+#        # Если остаток от деления на 4 равен 0, значит, число кратно
+#        echo "--- Достигнут шаг, кратный 4 (индекс: $index) ---"
+#        echo ""
+#        echo "Скачиваем куки в файл $COOKIES_FILE"
+#        ./get_cookies.py $COOKIES_FILE
+#        echo "Скачали куки в файл $COOKIES_FILE"
+#        echo ""
+#    fi
 
     /home/uadmin/.local/bin/yt-dlp \
         --ignore-errors \
@@ -165,7 +175,7 @@ while IFS= read -r channel_url || [[ -n "$channel_url" ]]; do
         --break-on-reject \
         --download-archive "$ARCHIVE_FILE" \
         --dateafter "now-${MAX_VIDEO_AGE}" \
-        --cookies "$COOKIES_FILE" \
+        --cookies-from-browser firefox \
         "$channel_url" < /dev/null >> "$INITIAL_LIST_FILE"
 
     # Увеличиваем счетчик на 1 в начале каждой итерации
@@ -319,13 +329,13 @@ if [ "$VIDEO_COUNT" -gt 0 ]; then
 #        --merge-output-format mp4 \
 #        --output "$BASE_DIR/%(channel)s/%(title)s [%(id)s].%(ext)s"
 
-      echo ""
-      echo "Скачиваем куки в файл $COOKIES_FILE"
-
-      ./get_cookies.py $COOKIES_FILE
-
-      echo "Скачали куки в файл $COOKIES_FILE"
-      echo ""
+#      echo ""
+#      echo "Скачиваем куки в файл $COOKIES_FILE"
+#
+#      ./get_cookies.py $COOKIES_FILE
+#
+#      echo "Скачали куки в файл $COOKIES_FILE"
+#      echo ""
 
       /home/uadmin/.local/bin/yt-dlp \
           --verbose \
@@ -333,7 +343,7 @@ if [ "$VIDEO_COUNT" -gt 0 ]; then
           --no-overwrites \
           --batch-file "$batch_file" \
           --download-archive "$ARCHIVE_FILE" \
-          --cookies "$COOKIES_FILE" \
+          --cookies-from-browser firefox \
           --sleep-interval "$MIN_SLEEP" \
           --max-sleep-interval "$MAX_SLEEP" \
           --format 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best[height<=480]' \
