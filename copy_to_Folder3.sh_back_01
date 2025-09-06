@@ -1,0 +1,291 @@
+#!/bin/bash
+
+FTP_USER="pc"
+FTP_PASS="569018"
+FTP_HOST="ftp://10.0.0.2:8913"
+REMOTE_BASE="/device/Movies"
+SOURCE_DIR="/mnt/82A23910A2390A65/Videos"
+
+TMP_FILES=$(mktemp)
+TMP_FILTERED=$(mktemp)
+
+echo "[INFO] Поиск файлов новее 3 месяцев..."
+find "$SOURCE_DIR" -mindepth 2 -type f -mtime -90 > "$TMP_FILES"
+
+# -------------------------------
+# Отмечаем базовые имена с mp4
+# -------------------------------
+declare -A HAS_MP4
+while IFS= read -r f; do
+    base=$(basename "$f")
+    ext="${base##*.}"
+    base_no_ext="${base%.*}"
+    if [[ "$ext" == "mp4" ]]; then
+        HAS_MP4["$base_no_ext"]=1
+    fi
+done < "$TMP_FILES"
+
+# -------------------------------
+# Фильтруем файлы
+# -------------------------------
+while IFS= read -r f; do
+    base=$(basename "$f")
+    ext="${base##*.}"
+    base_no_ext="${base%.*}"
+
+    # Пропускаем f140.m4a, если есть mp4 с таким же именем
+    if [[ "$ext" == "f140.m4a" && ${HAS_MP4[$base_no_ext]} ]]; then
+        continue
+    fi
+
+    echo "$f"
+done < "$TMP_FILES" > "$TMP_FILTERED"
+
+TOTAL=$(wc -l < "$TMP_FILTERED")
+echo "[INFO] Всего файлов для копирования: $TOTAL"
+#
+## -------------------------------
+## Фильтруем файлы и показываем пропущенные
+## -------------------------------
+#> "$TMP_FILTERED"  # очищаем файл на всякий случай
+#echo "[INFO] Пропущенные файлы (не будут скопированы):"
+#while IFS= read -r f; do
+#    base=$(basename "$f")
+#    ext="${base##*.}"
+#    base_no_ext="${base%.*}"
+#
+#    # Пропускаем f140.m4a, если есть mp4 с таким же именем
+#    if [[ "$ext" == "f140.m4a" && ${HAS_MP4[$base_no_ext]} ]]; then
+#        echo "[SKIPPED] $f"
+#        continue
+#    fi
+#
+#    echo "$f" >> "$TMP_FILTERED"
+#done < "$TMP_FILES"
+#
+#TOTAL=$(wc -l < "$TMP_FILTERED")
+#echo "[INFO] Всего файлов для копирования: $TOTAL"
+
+#SOURCE_DIR="/mnt/82A23910A2390A65/Videos"
+#TMP_FILES=$(mktemp)
+#TMP_FILTERED=$(mktemp)
+#
+## Находим все файлы за последние 3 месяца
+#find "$SOURCE_DIR" -mindepth 2 -type f -mtime -90 > "$TMP_FILES"
+#
+## Собираем список базовых имен .mp4
+#declare -A HAS_MP4
+#while IFS= read -r f; do
+#    ext="${f##*.}"
+#    base_no_ext="${f%.*}"
+#    if [[ "$ext" == "mp4" ]]; then
+#        HAS_MP4["$base_no_ext"]=1
+#    fi
+#done < "$TMP_FILES"
+#
+#echo "[INFO] Фильтрация файлов..."
+#echo "[INFO] Пропущенные (не будут копироваться):"
+#> "$TMP_FILTERED"
+#
+#while IFS= read -r f; do
+#    ext="${f##*.}"
+#    base_no_ext="${f%.*}"
+#
+#    # Пропускаем f140.m4a, если есть mp4 с таким же именем
+#    if [[ "$ext" == "f140.m4a" && ${HAS_MP4[$base_no_ext]} ]]; then
+#        echo "[SKIPPED] $f"
+#        continue
+#    fi
+#
+#    echo "$f" >> "$TMP_FILTERED"
+#done < "$TMP_FILES"
+#
+#TOTAL=$(wc -l < "$TMP_FILTERED")
+#echo "[INFO] Всего файлов для копирования: $TOTAL"
+#
+#
+#exit
+
+# -------------------------------
+# 10 самых старых файлов
+# -------------------------------
+echo ""
+echo "[INFO] 10 самых старых файлов:"
+while IFS= read -r f; do
+    DATE=$(date -d @"$(stat -c %Y "$f")" +"%Y-%m-%d %H:%M:%S")
+    REL_PATH="${f#$SOURCE_DIR/}"
+    echo "$DATE  $REL_PATH"
+done < "$TMP_FILTERED" | sort | head -10
+
+echo ""
+echo "[INFO] Начинаем копирование на FTP..."
+while IFS= read -r FILE; do
+    REL_PATH="${FILE#$SOURCE_DIR/}"
+    DIR_PATH=$(dirname "$REL_PATH")
+    FILE_NAME=$(basename "$FILE")
+
+    # Кодируем путь в URL
+    URL_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DIR_PATH'))")
+    URL_FILE_NAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$FILE_NAME'))")
+    FULL_URL="$FTP_HOST$REMOTE_BASE/$URL_PATH/$URL_FILE_NAME"
+
+    curl -u "$FTP_USER:$FTP_PASS" -T "$FILE" "$FULL_URL" --ftp-create-dirs
+    echo "[DEBUG] Скопирован на FTP: $FILE → $FULL_URL"
+done < "$TMP_FILTERED"
+
+echo "[INFO] Копирование завершено."
+
+rm -f "$TMP_FILES" "$TMP_FILTERED"
+
+
+##!/bin/bash
+#
+#FTP_USER="pc"
+#FTP_PASS="569018"
+#FTP_HOST="ftp://10.0.0.2:8913"
+#REMOTE_BASE="/device/Movies"
+#SOURCE_DIR="/mnt/82A23910A2390A65/Videos"
+#
+#TMP_FILES=$(mktemp)
+#TMP_FILTERED=$(mktemp)
+#TMP_FILTERED_NAMES=$(mktemp)
+#
+#echo "[INFO] Поиск файлов новее 3 месяцев..."
+#find "$SOURCE_DIR" -mindepth 2 -type f -mtime -90 > "$TMP_FILES"
+#
+## -------------------------------
+## Отмечаем базовые имена с mp4
+## -------------------------------
+#declare -A HAS_MP4
+#while IFS= read -r f; do
+#    base=$(basename "$f")
+#    ext="${base##*.}"
+#    base_no_ext="${base%.*}"
+#    if [[ "$ext" == "mp4" ]]; then
+#        HAS_MP4["$base_no_ext"]=1
+#    fi
+#done < "$TMP_FILES"
+#
+## -------------------------------
+## Фильтруем файлы: пропускаем f140.m4a, если есть mp4 с таким же базовым именем
+## -------------------------------
+#while IFS= read -r f; do
+#    base=$(basename "$f")
+#    ext="${base##*.}"
+#    base_no_ext="${base%.*}"
+#
+#    if [[ "$ext" == "f140.m4a" && ${HAS_MP4[$base_no_ext]} ]]; then
+#        continue
+#    fi
+#    echo "$f"
+#done < "$TMP_FILES" > "$TMP_FILTERED"
+#
+#TOTAL=$(wc -l < "$TMP_FILTERED")
+#echo ""
+#echo "[INFO] Всего отфильтровано файлов: $TOTAL"
+#
+## -------------------------------
+## Файлы с совпадающими именами
+## -------------------------------
+#echo ""
+#echo "[INFO] Файлы с совпадающими именами (разные расширения):"
+#awk -F/ '{print $NF}' "$TMP_FILES" | awk -F. '{print $1}' | sort | uniq -d | while read -r base; do
+#    grep "/$base\." "$TMP_FILES" | sed "s|^$SOURCE_DIR/||"
+#done
+#
+## -------------------------------
+## 10 самых старых файлов
+## -------------------------------
+#echo "[INFO] 10 самых старых файлов:"
+#while IFS= read -r f; do
+#    DATE=$(date -d @"$(stat -c %Y "$f")" +"%Y-%m-%d %H:%M:%S")  # дата в нужном формате
+#    REL_PATH="${f#$SOURCE_DIR/}"
+#    echo "$DATE  $REL_PATH"
+#done < "$TMP_FILTERED" | sort | head -10
+#
+#echo "[INFO] Начинаем копирование на FTP..."
+#while IFS= read -r FILE; do
+#    REL_PATH="${FILE#$SOURCE_DIR/}"
+#    DIR_PATH=$(dirname "$REL_PATH")
+#    FILE_NAME=$(basename "$FILE")
+#
+#    # Кодируем путь в URL
+#    URL_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DIR_PATH'))")
+#    URL_FILE_NAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$FILE_NAME'))")
+#    FULL_URL="$FTP_HOST$REMOTE_BASE/$URL_PATH/$URL_FILE_NAME"
+#
+#    curl -u "$FTP_USER:$FTP_PASS" -T "$FILE" "$FULL_URL" --ftp-create-dirs
+#    echo "[DEBUG] Скопирован на FTP: $FILE → $FULL_URL"
+#done < "$TMP_FILTERED"
+#
+#echo "[INFO] Копирование завершено."
+#
+#rm -f "$TMP_FILES" "$TMP_FILTERED" "$TMP_FILTERED_NAMES"
+#
+#
+###!/bin/bash
+##
+##FTP_USER="pc"
+##FTP_PASS="569018"
+##FTP_HOST="ftp://10.0.0.2:8913"
+##REMOTE_BASE="/device/Movies"
+##SOURCE_DIR="/mnt/82A23910A2390A65/Videos"
+##
+##TMP_FILES=$(mktemp)
+##TMP_FILTERED=$(mktemp)
+##TMP_FILTERED_NAMES=$(mktemp)
+##
+##echo "[INFO] Поиск файлов новее 3 месяцев..."
+##find "$SOURCE_DIR" -mindepth 2 -type f -mtime -90 > "$TMP_FILES"
+##
+##awk -F/ '{print $NF}' "$TMP_FILES" | awk -F. '{print $1}' | sort | uniq > "$TMP_FILTERED_NAMES"
+##grep -Ff "$TMP_FILTERED_NAMES" "$TMP_FILES" > "$TMP_FILTERED"
+##
+##TOTAL=$(wc -l < "$TMP_FILTERED")
+##echo ""
+##echo "[INFO] Всего отфильтровано файлов (уникальные имена): $TOTAL"
+##
+###echo "[INFO] Файлы с совпадающими именами (разные расширения):"
+###awk -F/ '{print $NF}' "$TMP_FILES" | awk -F. '{print $1}' | sort | uniq -d
+### -------------------------------
+### Файлы с совпадающими именами
+### -------------------------------
+##echo ""
+##echo "[INFO] Файлы с совпадающими именами (разные расширения):"
+##awk -F/ '{print $NF}' "$TMP_FILES" | awk -F. '{print $1}' | sort | uniq -d | while read -r base; do
+##    # Печатаем все полные имена файлов с этим базовым именем
+##    grep "/$base\." "$TMP_FILES" | sed "s|^$SOURCE_DIR/||"
+##done
+##
+###echo "[INFO] 10 самых старых файлов:"
+###while IFS= read -r f; do
+###    printf "%s\t%s\n" "$(stat -c %Y "$f")" "$f"
+###done < "$TMP_FILTERED" | sort -n | head -10 | cut -f2-
+### -------------------------------
+### 10 самых старых файлов
+### -------------------------------
+##echo "[INFO] 10 самых старых файлов:"
+##while IFS= read -r f; do
+##    DATE=$(stat -c "%y" "$f")            # дата изменения
+##    REL_PATH="${f#$SOURCE_DIR/}"         # путь относительно SOURCE_DIR
+##    echo "$DATE  $REL_PATH"
+##done < "$TMP_FILTERED" | sort | head -10
+##
+##echo "[INFO] Начинаем копирование на FTP..."
+##
+##while IFS= read -r FILE; do
+##    REL_PATH="${FILE#$SOURCE_DIR/}"
+##    DIR_PATH=$(dirname "$REL_PATH")
+##    # Кодируем путь в URL
+##    URL_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$DIR_PATH'))")
+##    FILE_NAME=$(basename "$FILE")
+##    URL_FILE_NAME=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$FILE_NAME'))")
+##    FULL_URL="$FTP_HOST$REMOTE_BASE/$URL_PATH/$URL_FILE_NAME"
+##
+##    curl -u "$FTP_USER:$FTP_PASS" -T "$FILE" "$FULL_URL" --ftp-create-dirs
+##    echo "[DEBUG] Скопирован на FTP: $FILE → $FULL_URL"
+##done < "$TMP_FILTERED"
+##
+##echo "[INFO] Копирование завершено."
+##
+##rm -f "$TMP_FILES" "$TMP_FILTERED" "$TMP_FILTERED_NAMES"

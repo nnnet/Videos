@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Настройки
+FTP_USER="pc"
+FTP_PASS="569018"
+FTP_HOST="ftp://10.0.0.2:8913"
+REMOTE_BASE="/device/Movies"
+SOURCE_DIR="/mnt/82A23910A2390A65/Videos"
+
+# Пути (относительно $SOURCE_DIR), которые исключаем
+EXCLUDE_PATHS=(
+    "OLD_FOLDERS"
+    "_scripts_temp"
+)
+
+echo "[INFO] Поиск новых файлов в: $SOURCE_DIR"
+
+# Временные файлы
+FILE_LIST=$(mktemp)
+DIR_LIST=$(mktemp)
+
+echo "[TRACE] Формируем выражение для исключений..."
+
+# Собираем исключающие пути
+EXCLUDE_EXPR=()
+for path in "${EXCLUDE_PATHS[@]}"; do
+    EXCLUDE_EXPR+=( -path "$SOURCE_DIR/$path" -prune -o )
+    echo "[DEBUG] Добавляем исключение: $SOURCE_DIR/$path"
+done
+
+echo "[TRACE] Запускаем find для поиска файлов новее 3 месяцев..."
+
+# Находим все файлы новее 3 месяцев с исключениями
+find "$SOURCE_DIR" \
+    \( "${EXCLUDE_EXPR[@]}" -false \) -o \
+    \( -type f -newermt "$(date --date='3 months ago' +'%Y-%m-%d')" \) \
+    -print > "$FILE_LIST"
+
+FILE_COUNT=$(wc -l < "$FILE_LIST")
+echo "[INFO] Найдено $FILE_COUNT файлов новее 3 месяцев"
+
+if [[ "$FILE_COUNT" -eq 0 ]]; then
+    echo "[INFO] Нет новых файлов для загрузки."
+    rm -f "$FILE_LIST" "$DIR_LIST"
+    exit 0
+fi
+
+echo "[TRACE] Получаем список уникальных директорий..."
+
+# Получаем уникальный список директорий, где есть свежие файлы
+while IFS= read -r file; do
+    dirname "$file"
+done < "$FILE_LIST" | sort -u > "$DIR_LIST"
+
+DIR_COUNT=$(wc -l < "$DIR_LIST")
+echo "[INFO] Найдено $DIR_COUNT уникальных директорий с новыми файлами"
+
+echo "[INFO] ----- ОТФИЛЬТРОВАННЫЙ СПИСОК ФАЙЛОВ -----"
+
+FILTERED_FILE_LIST=$(mktemp)
+TMP_FILTERED=$(mktemp)
+
+echo "[TRACE] Формируем отфильтрованный список файлов с помощью stat и awk..."
+
+echo "[TRACE] Проверяем вывод stat для каждого файла:"
+while IFS= read -r FILE; do
+    stat_output=$(stat --format='%Y|%y|%n' "$FILE") || {
+        echo "[WARN] Не удалось stat для $FILE"
+        continue
+    }
+    echo "[DEBUG] stat output: $stat_output"
+    echo "$stat_output"
+done < "$FILE_LIST" | awk -F'|' '
+function get_core(name) {
+    gsub(/(\.[^.]*)$/, "", name)
+    sub(/\.[a-z0-9]+$/, "", name)
+    return name
+}
+{
+    core = get_core($3)
+    if (!(core in seen) || length($3) < length(seen[core])) {
+        seen[core] = $3
+        time[core] = $2
+        epoch[core] = $1
+    }
+}
+END {
+    for (c in seen) {
+        print epoch[c] "|" time[c] "|" seen[c]
+    }
+}
+' > "$TMP_FILTERED"
+
+echo "[INFO] ----- 10 САМЫХ СТАРЫХ ФАЙЛОВ -----"
+sort -n "$TMP_FILTERED" | head -n 10 | cut -d'|' -f2-
+echo "[INFO] -----------------------------------"
+
+TOTAL=$(wc -l < "$TMP_FILTERED")
+echo "[INFO] Всего отфильтровано файлов: $TOTAL"
+
+cp "$TMP_FILTERED" "$FILTERED_FILE_LIST"
+rm -f "$TMP_FILTERED"
+
+echo "[TRACE] Выводим список файлов:"
+cut -d'|' -f3 "$FILTERED_FILE_LIST"
+
+echo "[INFO] ----- КОНЕЦ СПИСКА -----"
+cut -d'|' -f3 "$FILTERED_FILE_LIST"
+
+echo "[TRACE] Проверяем наличие lftp..."
+
+if ! command -v lftp >/dev/null; then
+    echo "[ERROR] Команда 'lftp' не найдена. Установите её: sudo apt install lftp"
+    rm -f "$FILTERED_FILE_LIST" "$FILE_LIST" "$DIR_LIST"
+    exit 1
+fi
+
+echo "[INFO] Начинаем копирование отфильтрованных файлов..."
+
+# --- DEBUG цикл копирования ---
+
+while IFS='|' read -r epoch time filepath; do
+    echo "[DEBUG] Читаем строку: epoch=$epoch time=$time filepath=$filepath"
+
+    if [[ -z "$filepath" ]]; then
+        echo "[WARN] Пропущена строка с неверным форматом"
+        continue
+    fi
+
+    REL_PATH=$(realpath --relative-to="$SOURCE_DIR" "$filepath")
+    echo "[DEBUG] REL_PATH: $REL_PATH"
+
+    if [[ "$REL_PATH" != */* ]]; then
+        echo "[INFO] Пропускаем файл в корне (нет поддиректорий): $filepath"
+        continue
+    fi
+
+    REMOTE_DIR="$REMOTE_BASE/$(dirname "$REL_PATH")"
+    REMOTE_FILE="$REMOTE_BASE/$REL_PATH"
+    REMOTE_SUBDIRS=$(dirname "$REL_PATH")
+
+    echo "[DEBUG] REMOTE_DIR: $REMOTE_DIR"
+    echo "[DEBUG] REMOTE_FILE: $REMOTE_FILE"
+    echo "[INFO] Копируем файл: $filepath → $REMOTE_FILE"
+
+    echo "[TRACE] Запускаем lftp для копирования файла..."
+
+    lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF
+set ftp:mkdir -p true
+set ssl:verify-certificate false
+set cmd:trace true
+set xfer:clobber true
+
+cd "$REMOTE_BASE"
+
+# mkdir для каждого уровня (можно убрать, если mkdir -p сработает)
+$(awk -F'/' '{
+    path=""
+    for(i=1; i<=NF; i++) {
+        path=path "/" $i
+        gsub(/"/, "\\\"", path)
+        print "mkdir -f \"" path "\""
+    }
+}' <<< "$REMOTE_SUBDIRS")
+
+cd "$REMOTE_DIR"
+put "$filepath"
+quit
+EOF
+
+    echo "[INFO] Завершено копирование: $filepath"
+
+done < "$FILTERED_FILE_LIST"
+
+echo "[TRACE] --- ТЕСТОВЫЙ БЛОК ---"
+test_file="$(head -n1 "$FILTERED_FILE_LIST" | cut -d'|' -f3)"
+echo "[TEST] Тестовое копирование файла: $test_file"
+rel_path_test=$(realpath --relative-to="$SOURCE_DIR" "$test_file")
+remote_dir_test="$REMOTE_BASE/$(dirname "$rel_path_test")"
+
+echo "[TRACE] REMOTE_DIR для теста: $remote_dir_test"
+echo "[TRACE] Тестовый файл: $test_file"
+
+lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF
+set ftp:mkdir -p true
+set ssl:verify-certificate false
+set cmd:trace true
+set xfer:clobber true
+
+cd "$remote_dir_test"
+put "$test_file"
+quit
+EOF
+
+echo "[TEST] Завершено тестовое копирование."
+exit 0
+
+rm -f "$FILTERED_FILE_LIST" "$FILE_LIST" "$DIR_LIST"
+
+echo "[DONE] Готово!"
+
+
+
+## find /mnt/82A23910A2390A65/Videos -type f -newermt "$(date --date='3 months ago' +'%Y-%m-%d')" -exec lftp -u user123,pass123 -e "mirror -R {} ftp://10.0.0.2:8913/device; quit" \;
+## find /mnt/82A23910A2390A65/Videos -type d -newermt "$(date --date='3 months ago' +'%Y-%m-%d')" -exec lftp -u pc,231089 -e "mirror -R -n {} ftp://10.0.0.2:8913/device/Movies; quit" \;
+#
+#
+#
+#
+#set -euo pipefail
+#
+## Настройки
+#FTP_USER="pc"
+#FTP_PASS="569018"
+#FTP_HOST="ftp://10.0.0.2:8913"
+#REMOTE_BASE="/device/Movies"
+#SOURCE_DIR="/mnt/82A23910A2390A65/Videos"
+#
+## Пути (относительно $SOURCE_DIR), которые исключаем
+#EXCLUDE_PATHS=(
+#    "OLD_FOLDERS"
+#    "_scripts_temp"
+#)
+#
+#echo "[INFO] Поиск новых файлов в: $SOURCE_DIR"
+#
+## Временный файл
+#DIR_LIST=$(mktemp)
+#
+## Собираем исключающие пути
+#EXCLUDE_EXPR=()
+#for path in "${EXCLUDE_PATHS[@]}"; do
+#    EXCLUDE_EXPR+=( -path "$SOURCE_DIR/$path" -prune -o )
+#done
+#
+## Выполняем find: ищем файлы новее 3 месяцев, НЕ в корне SOURCE_DIR
+## find "$SOURCE_DIR" \
+##     \( "${EXCLUDE_EXPR[@]}" -false \) -o \
+##     \( -type f -newermt "$(date --date='3 months ago' +'%Y-%m-%d')" \) \
+##     -printf '%p\n' |
+##     grep -v "^$SOURCE_DIR/[^/]\+$" |  # Исключаем файлы в самом $SOURCE_DIR
+##     xargs -I{} dirname {} |
+##     sort -u > "$DIR_LIST"
+#find "$SOURCE_DIR" \
+#    \( "${EXCLUDE_EXPR[@]}" -false \) -o \
+#    \( -type f -newermt "$(date --date='3 months ago' +'%Y-%m-%d')" \) \
+#    -printf '%p\n' |
+#    xargs -I{} dirname {} |
+#    sort -u > "$DIR_LIST"
+#
+#FOUND_COUNT=$(wc -l < "$DIR_LIST")
+#echo "[INFO] Найдено $FOUND_COUNT уникальных директорий"
+#
+## Если ничего не найдено — завершаем
+#if [[ "$FOUND_COUNT" -eq 0 ]]; then
+#    echo "[INFO] Нет новых файлов для загрузки."
+#    rm -f "$DIR_LIST"
+#    exit 0
+#fi
+#
+#echo "[INFO] ----- ТОП 10 СВЕЖИХ ФАЙЛОВ ДЛЯ КОПИРОВАНИЯ -----"
+#while IFS= read -r FILE; do
+#    echo "$(stat --format='%Y|%y|%n' "$FILE")"
+#done < "$TMP_FILE" |
+#sort -nr |              # Сортируем по числу секунд с эпохи (по убыванию)
+#head -n 10 |            # Берём первые 10
+#cut -d'|' -f2-          # Показываем красивую дату и путь
+#echo "[INFO] ----- КОНЕЦ СПИСКА -----"
+#
+#
+## Копируем каждую директорию
+#while IFS= read -r DIR; do
+#    [ -d "$DIR" ] || {
+#        echo "[WARN] Каталог не найден: $DIR"
+#        continue
+#    }
+#
+#    REL_PATH=$(realpath --relative-to="$SOURCE_DIR" "$DIR" || echo "")
+#    if [[ -z "$REL_PATH" ]]; then
+#        echo "[WARN] Не удалось построить относительный путь: $DIR"
+#        continue
+#    fi
+#
+#    echo "[INFO] Загрузка: $DIR → $REMOTE_BASE/$REL_PATH"
+#
+#    lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF
+#mirror -R -n "$DIR" "$REMOTE_BASE/$REL_PATH"
+#quit
+#EOF
+#
+#done < "$DIR_LIST"
+#
+## Очистка
+#rm -f "$DIR_LIST"
+#echo "[DONE] Готово!"
+#
+#
+#
+#
+#
+#
+#
+## lftp -u user123,pass123 -e "
+## cd /device;
+## cls -1 | while read file; do
+##     # Проверяем, не входит ли файл в исключённый список
+##     if [[ ! $file =~ ^(folder1|folder2|folder3)/ ]]; then
+##         # Если файл старше 3 месяцев, удаляем его
+##         if [ $(lftp -e 'stat $file' | grep 'Modify' | awk '{print $2}') \< $(date --date='3 months ago' +'%Y-%m-%d') ]; then
+##             rm $file;
+##         fi;
+##     fi;
+## done;
+## quit
+## " ftp://10.0.0.2:8913
+#
