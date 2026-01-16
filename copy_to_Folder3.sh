@@ -291,7 +291,7 @@ EOF
 
         # 5. Проверка: существует ли файл в таком безопасном виде на FTP
         if grep -Fxq "$ftp_safe_relpath" /tmp/ftp_dir_files_relative.txt; then
-            echo "[EXIST] $file_birth_str $ftp_safe_relpath"
+            # echo "[EXIST] $file_birth_str $ftp_safe_relpath"
             continue
         else
 

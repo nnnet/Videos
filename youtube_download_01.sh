@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Обновляем yt-dlp
+# pip install -U --break-system-packages yt-dlp
+
 # Посмотреть список профилей можно:
 # yt-dlp --cookies-from-browser firefox --print-traffic --simulate https://youtu.be/dQw4w9WgXcQ
 #
