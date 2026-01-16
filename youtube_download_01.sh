@@ -99,14 +99,16 @@ echo ""
 # Проверка, установлены ли необходимые программы
 #if ! command -v /home/uadmin/.local/bin/yt-dlp &> /dev/null; then
 if [ ! -x /home/uadmin/.local/bin/yt-dlp ]; then
-    echo "Ошибка: yt-dlp не установлен или не найден в PATH." >&2
+#    echo "Ошибка: yt-dlp не установлен или не найден в PATH." >&2
+    echo -e "\033[31m❌ Ошибка: yt-dlp не установлен или не найден в PATH.\033[0m" >&2
     echo "Пожалуйста, установите его: https://github.com/yt-dlp/yt-dlp" >&2
     echo "--- End download $(date '+%Y-%m-%d %H:%M:%S') ---"
     exit 1
 fi
 
 if ! command -v ffmpeg &> /dev/null; then
-    echo "Ошибка: ffmpeg не установлен. Он необходим для слияния видео и аудио." >&2
+#    echo "Ошибка: ffmpeg не установлен. Он необходим для слияния видео и аудио." >&2
+    echo -e "\033[31m❌ Ошибка: ffmpeg не установлен. Он необходим для слияния видео и аудио.\033[0m" >&2
     echo "Пожалуйста, установите его (например, 'sudo apt install ffmpeg')." >&2
     echo "--- End download $(date '+%Y-%m-%d %H:%M:%S') ---"
     exit 1
@@ -160,19 +162,9 @@ while IFS= read -r channel_url || [[ -n "$channel_url" ]]; do
     echo "Проверяю канал: $channel_url"
     echo ""
 
-
-#    if (( index % 4 == 0 )); then
-#        # Если остаток от деления на 4 равен 0, значит, число кратно
-#        echo "--- Достигнут шаг, кратный 4 (индекс: $index) ---"
-#        echo ""
-#        echo "Скачиваем куки в файл $COOKIES_FILE"
-#        ./get_cookies.py $COOKIES_FILE
-#        echo "Скачали куки в файл $COOKIES_FILE"
-#        echo ""
-#    fi
-
     /home/uadmin/.local/bin/yt-dlp \
-        --ignore-errors \
+        --js-runtimes quickjs \
+        --remote-components ejs:github \
         --get-id \
         --lazy-playlist \
         --break-on-reject \
@@ -243,10 +235,10 @@ if [ -f "$ARCHIVE_FILE" ]; then
     fi
 else
     # Если архива нет, то все видео из начального списка идут в финальный
+    echo "--- Все видео из начального списка идут в финальный ---"
     cp "$INITIAL_LIST_FILE" "$FINAL_LIST_FILE"
 fi
 # --- КОНЕЦ НОВОГО БЛОКА ---
-
 
 # Проверяем, остались ли видео после финальной фильтрации
 if [ ! -s "$FINAL_LIST_FILE" ]; then
@@ -264,28 +256,12 @@ echo "Итого к загрузке: $VIDEO_COUNT видео."
 echo "---------------------------------"
 echo ""
 
+# Создаем список каналов, куда было загружено видео
+channels_to_clean=()
+
 
 if [ "$VIDEO_COUNT" -gt 0 ]; then
   echo "Начинаю загрузку с паузами от $MIN_SLEEP до $MAX_SLEEP секунд между видео..."
-
-#  # Используем уже отфильтрованный FINAL_LIST_FILE.
-#  # --download-archive оставляем как дополнительную меру защиты.
-#  yt-dlp \
-#      --verbose \
-#      --ignore-errors \
-#      --no-overwrites \
-#      --batch-file "$FINAL_LIST_FILE" \
-#      --download-archive "$ARCHIVE_FILE" \
-#      --cookies "$COOKIES_FILE" \
-#      --sleep-interval "$MIN_SLEEP" \
-#      --max-sleep-interval "$MAX_SLEEP" \
-#      --format 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best[height<=480]' \
-#      --merge-output-format mp4 \
-#      --output "$BASE_DIR/%(channel)s/%(title)s [%(id)s].%(ext)s" \
-#      ;
-#
-#  echo ""
-#  echo "--- Загрузка завершена ---"
 
   # Создаем временную директорию для файлов-батчей
   # Она будет автоматически удалена при выходе из скрипта
@@ -319,27 +295,6 @@ if [ "$VIDEO_COUNT" -gt 0 ]; then
       echo "=============================================================================="
 
       # ЗАПУСК КОМАНДЫ YT-DLP ДЛЯ ТЕКУЩЕГО ПАКЕТА
-#      yt-dlp \
-#        --verbose \
-#        --ignore-errors \
-#        --no-overwrites \
-#        --batch-file "$batch_file" \
-#        --download-archive "$ARCHIVE_FILE" \
-#        --cookies "$COOKIES_FILE" \
-#        --sleep-interval "$MIN_SLEEP" \
-#        --max-sleep-interval "$MAX_SLEEP" \
-#        --format 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best[height<=480]' \
-#        --merge-output-format mp4 \
-#        --output "$BASE_DIR/%(channel)s/%(title)s [%(id)s].%(ext)s"
-
-#      echo ""
-#      echo "Скачиваем куки в файл $COOKIES_FILE"
-#
-#      ./get_cookies.py $COOKIES_FILE
-#
-#      echo "Скачали куки в файл $COOKIES_FILE"
-#      echo ""
-
       /home/uadmin/.local/bin/yt-dlp \
           --verbose \
           --ignore-errors \
@@ -358,6 +313,32 @@ if [ "$VIDEO_COUNT" -gt 0 ]; then
           echo "ВНИМАНИЕ: yt-dlp завершился с ошибкой при обработке пакета $current_batch_num. Продолжаем со следующим пакетом из-за опции --ignore-errors."
       fi
 
+      # Добавляем канал в список для очистки после загрузки
+      # Извлекаем имя канала на основе URL
+      # Предполагается, что канал всегда имеет формат https://www.youtube.com/@channelname/videos
+
+      echo "batch_file=$batch_file"
+      # channel_dir=$(dirname "$BASE_DIR/$(basename $(head -n 1 "$batch_file"))")
+      channel_url=$(head -n 1 "$batch_file")
+      echo "channel_url=$channel_url"
+
+      # Проверяем, что это действительно канал (по URL)
+      if [[ "$channel_url" =~ https?://(www\.)?youtube\.com/@([^/]+) ]]; then
+          channel_name="${BASH_REMATCH[2]}"  # Имя канала (канал в URL)
+          channel_dir="$BASE_DIR/$channel_name"
+
+          # Добавляем канал в список, если он еще не был добавлен
+          if [[ ! " ${channels_to_clean[@]} " =~ " ${channel_dir} " ]]; then
+              channels_to_clean+=("$channel_dir")
+              echo "$channel_dir добавлен в список для очистки"
+          else
+            echo "❌ $channel_dir не добавлен в список для очистки"
+            echo -e "\033[31m❌ $channel_dir не добавлен в список для очистки\033[0m"
+          fi
+      else
+        echo "❌ $channel_url не является папкой"
+        echo -e "\033[31m❌ $channel_url не является папкой\033[0m"
+      fi
       echo ""
   done
 
@@ -370,5 +351,22 @@ else
   echo "--- Загрузка отменена ---"
 fi
 
+# Шаг 3: Очистка ненужных файлов внутри каналов, куда были скачаны видео
+# Проверяем длину массива channels_to_clean
+if [ ${#channels_to_clean[@]} -gt 0 ]; then
+    echo "Очистка ненужных файлов внутри загруженных каналов..."
+
+    for channel_dir in "${channels_to_clean[@]}"; do
+        echo "Очищаю канал: $channel_dir"
+        # Удаляем все файлы, не являющиеся .mp4 внутри канала
+        find "$channel_dir" -type f ! -name "*.mp4" -exec rm -f {} \;
+    done
+
+#    echo "✅ Очистка завершена."
+    echo -e "\033[32m✅ Очистка завершена.\033[0m"
+else
+#    echo "Нет каналов для очистки. Пропускаю этап очистки."
+    echo -e "\033[31m❌ Очистка не выполнена: нет каналов для очистки.\033[0m"
+fi
 
 echo "--- End download $(date '+%Y-%m-%d %H:%M:%S') ---"
