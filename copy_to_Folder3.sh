@@ -152,6 +152,7 @@ _PREV_FTPMKDIR=''
 
 
 ftp_mkdirs() {
+#    echo "1"
     if [[ "${_PREV_FTPMKDIR:-}" == "$1" ]]; then
         echo "MKDIR_SKIP: [$1]"
         return 0
@@ -164,32 +165,231 @@ ftp_mkdirs() {
 
     # echo "DIR: [$dir]"
 
+#    echo "2"
     IFS='/' read -r -a PARTS <<< "$dir"
     for idx in "${!PARTS[@]}"; do
         part="${PARTS[$idx]}"
         # echo "[$idx] [$part]"
     done
 
+#    echo "3"
     for part in "${PARTS[@]}"; do
         [[ -z "$part" ]] && continue
         current="${current:+$current/}$part"
 
+#        echo "4"
         set +e
         lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e "cls -d \"/$current\"; bye" > /dev/null 2>&1
         exists=$?
         set -e
+#        echo "5"
 
         if [[ $exists -eq 0 ]]; then
             # echo "MKDIR_EXISTS: [$current]"
+#            echo "continue"
             continue
         else
+#            echo "6"
             echo "MKDIR: [$current]"
             set +e
             lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e "mkdir \"/$current\"; bye" > /dev/null 2>&1
             set -e
             echo "MKDIR_END: [$current]"
         fi
+
     done
+}
+
+# Функция для получения свободного места на FTP-сервере
+get_ftp_free_space() {
+    echo "[DEBUG] get_ftp_free_space 0"
+    echo "[DEBUG] FTP_USER=$FTP_USER"
+    echo "[DEBUG] FTP_PASS=$FTP_PASS"
+    echo "[DEBUG] FTP_HOST=$FTP_HOST"
+    echo "[DEBUG] REMOTE_BASE=$REMOTE_BASE"
+
+    # Пытаемся получить свободное место через команду df
+    local free_space
+    echo "[DEBUG] get_ftp_free_space 0.0"
+    free_space=$(lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e "df $REMOTE_BASE; bye" 2>/dev/null)
+    echo "[DEBUG] get_ftp_free_space 1"
+
+    # Для отладки: выводим весь ответ команды df
+    echo "[DEBUG] df output: $free_space"
+
+    # Если команда df не вернула свободное место, пробуем команду quota
+    if [[ -z "$free_space" ]]; then
+        echo "[DEBUG] df не вернул результатов. Пробую команду quota..."
+        free_space=$(lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e "quota; bye" 2>/dev/null)
+
+        # Для отладки: выводим весь ответ команды quota
+        echo "[DEBUG] quota output: $free_space"
+    fi
+
+    # Если и команда quota не дала результата, сообщаем об ошибке
+    if [[ -z "$free_space" ]]; then
+        echo "❌ [ERROR] Не удалось получить информацию о свободном месте на FTP."
+#        return 1
+#        exit 1
+    fi
+
+    # Извлекаем число свободного места
+    echo "[DEBUG] Пытаемся извлечь свободное место: $free_space"
+    free_space=$(echo "$free_space" | grep -Eo '[0-9]+[[:space:]]+[0-9]+%' | awk '{print $1}')
+    echo "[DEBUG] After grep and awk, free_space: $free_space"
+
+    # Возвращаем свободное место
+    echo $free_space
+}
+
+# Функция для удаления файла с сервера (очистка при ошибке)
+cleanup_ftp() {
+    echo "[SYNC] Обнаружена ошибка или несовпадение размера. Удаляем некорректный файл $ftp_safe_name с сервера..."
+    # Подключаемся, переходим в папку и удаляем файл
+    lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF_CLEANUP 2>&1 > /dev/null
+    cd "$ftp_target_dir"
+    rm -f "$ftp_safe_name"
+    quit
+EOF_CLEANUP
+}
+
+# Изменение процесса копирования с проверкой свободного места
+
+# Проверяем, есть ли достаточно места на FTP-сервере для загрузки файла
+check_and_copy_file() {
+    echo "check_and_copy_file 0"
+    local orig_filepath="$1"
+    local ftp_target_dir="$2"
+    local ftp_safe_name="$3"
+
+    echo "check_and_copy_file 1"
+
+    # Получаем размер файла
+    local file_size
+    file_size=$(stat -c %s "$orig_filepath")
+#    echo "check_and_copy_file 2"
+#
+#    # Получаем свободное место на FTP
+#    local free_space
+#
+#    echo "[DEBUG] Проверяем свободное место на FTP перед копированием"
+#    free_space=$(get_ftp_free_space)
+##    if declare -f get_ftp_free_space > /dev/null; then
+##        echo "[DEBUG] Функция get_ftp_free_space найдена."
+##      free_space=$(get_ftp_free_space)
+##    else
+##        echo "[ERROR] Функция get_ftp_free_space не найдена."
+##    fi
+#    echo "[DEBUG] Свободное место на FTP: $free_space"
+#
+#    # Проверка числовых значений
+#    if [[ ! "$file_size" =~ ^[0-9]+$ ]] || [[ ! "$free_space" =~ ^[0-9]+$ ]]; then
+#        echo "❌ [ERROR] Не удалось получить размер файла или свободное место. Пропускаю файл."
+#        echo "file_size=$file_size"
+#        echo "free_space=$free_space"
+#        echo " "
+#        return 1
+#    fi
+#    echo "check_and_copy_file 4"
+#
+#    # Теперь безопасно можно выполнить арифметическую операцию
+#    space_needed=$((file_size - free_space))
+#
+#    # Сравниваем свободное место с размером файла
+#    if [[ "$file_size" -gt "$free_space" ]]; then
+#        echo -e "\n[ERROR] Недостаточно места на FTP-сервере для копирования файла $orig_filepath (не хватает $(($file_size - $free_space)) байт). Пропускаю файл."
+#        return 1
+#    fi
+
+    # Если место достаточно, копируем файл
+    echo "[SYNC] Копирую $orig_filepath → $ftp_target_dir/$ftp_safe_name"
+
+    # Вызов функции для создания директорий (если нужно)
+    ftp_mkdirs "$ftp_target_dir"
+    echo "[SYNC] ftp_mkdirs"
+
+#    # Копирование файла через lftp
+#    set +e
+#    timeout 600 lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF > /tmp/lftp_put_out.txt 2>&1
+#cd "$ftp_target_dir"
+#put "$orig_filepath" -o "$ftp_safe_name"
+#ls
+#EOF
+#    ret=$?
+#    set -e
+#    echo "[SYNC] timeout 600 lftp"
+#
+#    if [[ $ret -ne 0 ]]; then
+#        echo -e "\n[ERROR] Ошибка при копировании $orig_filepath → $ftp_target_dir/$ftp_safe_name. Код ошибки: $ret"
+#        return 1
+#    fi
+#
+#    return 0
+
+    # 1. Получаем размер исходного локального файла
+    if [ ! -f "$orig_filepath" ]; then
+        echo "[ERROR] Локальный файл не найден: $orig_filepath"
+        return 1
+    fi
+
+    local_size=$(stat -c %s "$orig_filepath")
+    echo "[SYNC] Размер локального файла: $local_size байт"
+
+    # 2. Загрузка файла на сервер
+    set +e
+    timeout 600 lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF > /tmp/lftp_put_out.txt 2>&1
+set xfer:clobber on
+set net:timeout 10
+set net:max-retries 2
+cd "$ftp_target_dir"
+put "$orig_filepath" -o "$ftp_safe_name"
+ls -l "$ftp_safe_name"
+EOF
+    ret=$?
+    set -e
+
+    # 3. Проверка кода возврата lftp
+    if [[ $ret -ne 0 ]]; then
+        echo -e "\n[ERROR] Ошибка lftp при копировании $orig_filepath. Код: $ret"
+        cat /tmp/lftp_put_out.txt # Вывод лога для отладки
+        cleanup_ftp
+        # return 1
+    else
+      # 4. Проверка целостности (сравнение размеров)
+      # Получаем размер удаленного файла. Команда quote SIZE возвращает "213 <size>" или просто "<size>"
+      remote_size_info=$(lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e "cd '$ftp_target_dir'; quote SIZE '$ftp_safe_name'; quit" 2>&1)
+
+      # Извлекаем числовое значение из ответа (последнее число в строке)
+      remote_size=$(echo "$remote_size_info" | grep -oE '[0-9]+$')
+
+      echo "[SYNC] Размер файла на сервере: $remote_size байт"
+
+      if [[ "$local_size" -ne "$remote_size" ]]; then
+          echo -e "\n[ERROR] Несовпадение размеров! Локально: $local_size, Удаленно: $remote_size. Файл поврежден."
+          cleanup_ftp
+#          return 1
+      else
+          echo "[SYNC] Файл успешно скопирован и проверен."
+      fi
+
+    fi
+
+#    # 4. Проверка целостности (сравнение размеров)
+#    # Получаем размер удаленного файла. Команда quote SIZE возвращает "213 <size>" или просто "<size>"
+#    remote_size_info=$(lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e "cd '$ftp_target_dir'; quote SIZE '$ftp_safe_name'; quit" 2>&1)
+#
+#    # Извлекаем числовое значение из ответа (последнее число в строке)
+#    remote_size=$(echo "$remote_size_info" | grep -oE '[0-9]+$')
+#
+#    echo "[SYNC] Размер файла на сервере: $remote_size байт"
+#
+#    if [[ "$local_size" -ne "$remote_size" ]]; then
+#        echo -e "\n[ERROR] Несовпадение размеров! Локально: $local_size, Удаленно: $remote_size. Файл поврежден."
+#        cleanup_ftp
+#        return 1
+#    fi
+
+    return 0
 }
 
 
@@ -309,31 +509,35 @@ EOF
             # printf '[DEBUG] 1.2.5 filepath for stat: %q' "$ftp_target_dir"
             # printf '\n\n'
 
-            # ftp_mkdirs "$ftp_target_dir"
-            # echo "[DEBUG] CALLING ftp_mkdirs [$ftp_target_dir]"
-            ftp_mkdirs "$ftp_target_dir"
-            # echo "[DEBUG] END CALL ftp_mkdirs [$ftp_target_dir]"
+#            # ftp_mkdirs "$ftp_target_dir"
+#            # echo "[DEBUG] CALLING ftp_mkdirs [$ftp_target_dir]"
+#            ftp_mkdirs "$ftp_target_dir"
+#            # echo "[DEBUG] END CALL ftp_mkdirs [$ftp_target_dir]"
+#
+#            # exit
+#
+#            # printf '[DEBUG] 1.3 filepath for stat: %q\n' "$orig_filepath"
+#
+#            # # which lftp || { echo '[ERROR] lftp не найден в PATH'; exit 127; }
+#            # echo "------"
+#            # echo "[PRE-CHECK] orig_filepath=$orig_filepath"
+#            # ls -la "$orig_filepath"
+#            # echo "[PRE-CHECK] ftp_target_dir=$ftp_target_dir"
+#            # echo "[PRE-CHECK] ftp_safe_name=$ftp_safe_name"
+#            # echo "------"
+#
+#            set +e
+#            timeout 600 lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF > /tmp/lftp_put_out.txt 2>&1
+#cd "$ftp_target_dir"
+#put "$orig_filepath" -o "$ftp_safe_name"
+#ls
+#EOF
+#            ret=$?
+#            set -e
 
-            # exit
-
-            # printf '[DEBUG] 1.3 filepath for stat: %q\n' "$orig_filepath"
-
-            # # which lftp || { echo '[ERROR] lftp не найден в PATH'; exit 127; }
-            # echo "------"
-            # echo "[PRE-CHECK] orig_filepath=$orig_filepath"
-            # ls -la "$orig_filepath"
-            # echo "[PRE-CHECK] ftp_target_dir=$ftp_target_dir"
-            # echo "[PRE-CHECK] ftp_safe_name=$ftp_safe_name"
-            # echo "------"
-
-            set +e
-            timeout 600 lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF > /tmp/lftp_put_out.txt 2>&1
-cd "$ftp_target_dir"
-put "$orig_filepath" -o "$ftp_safe_name"
-ls
-EOF
-            ret=$?
-            set -e
+            # Проверка и копирование файла
+            echo "[SYNC] check_and_copy_file"
+            check_and_copy_file "$orig_filepath" "$ftp_target_dir" "$ftp_safe_name"
 
             # # Здесь — строго соответствует отправленной lftp-команде!
             # echo "[COPY-DEBUG] put \"$orig_filepath\" -O \"$ftp_target_dir\" -- \"$ftp_safe_name\""
