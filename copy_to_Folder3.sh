@@ -7,7 +7,7 @@ FTP_USER="pc"
 FTP_PASS="569018"
 FTP_HOST="ftp://10.0.0.2:8913"
 REMOTE_BASE="/device/Movies"
-SOURCE_DIR="/mnt/82A23910A2390A65/Videos"
+SOURCE_DIR="/mnt/82A23910A2390A65/Videos/Youtube"
 
 DAYS_AGO=90  # 3 месяца "условно" = 90 дней
 DAYS_AGO=30  # 1 месяц "условно" = 30 дней
@@ -15,8 +15,6 @@ DAYS_AGO=30  # 1 месяц "условно" = 30 дней
 # Пути (относительно $SOURCE_DIR), которые исключаем
 EXCLUDE_PATHS=(
     "OLD_FOLDERS"
-    "_scripts_temp"
-    "111"
     ".git"
     ".idea"
 )

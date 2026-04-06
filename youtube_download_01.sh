@@ -48,14 +48,13 @@ cd /mnt/82A23910A2390A65/Videos/
 #    Скрипт создаст ее, если она не существует.
 #    Пример для Linux: BASE_DIR="$HOME/Видео/YouTube"
 #    Пример для Windows (WSL) или внешнего диска: BASE_DIR="/mnt/d/Videos/YouTube"
-BASE_DIR="/mnt/82A23910A2390A65/Videos"
+BASE_DIR="/mnt/82A23910A2390A65/Videos/Youtube"
 
-# 2. Имя файла со списком каналов (будет находиться внутри BASE_DIR).
-#    В файле должен быть один URL-адрес канала на строку.
-CHANNELS_FILE="$BASE_DIR/_channels.txt"
+# 2. Имя файла со списком каналов (находится в корневой папке проекта).
+CHANNELS_FILE="/mnt/82A23910A2390A65/Videos/_channels.txt"
 
 # 3. Путь к файлу-архиву, где yt-dlp хранит ID уже скачанных видео.
-ARCHIVE_FILE="$BASE_DIR/_download_archive.txt"
+ARCHIVE_FILE="/mnt/82A23910A2390A65/Videos/_download_archive.txt"
 
 # 4. Скачивать только видео, которые были загружены не ранее указанного срока.
 #    Форматы: "14days", "2weeks", "1month", "3months" и т.д.
