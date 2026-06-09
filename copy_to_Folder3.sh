@@ -12,6 +12,10 @@ SOURCE_DIR="/mnt/82A23910A2390A65/Videos/Youtube"
 DAYS_AGO=90  # 3 месяца "условно" = 90 дней
 DAYS_AGO=30  # 1 месяц "условно" = 30 дней
 
+# Размер чанка для head/tail хеш-проверки (fallback если сервер не умеет HASH).
+# 1 МиБ ловит обрывы и порчу краёв, не удваивая трафик.
+HASH_CHUNK=1048576
+
 # Пути (относительно $SOURCE_DIR), которые исключаем
 EXCLUDE_PATHS=(
     "OLD_FOLDERS"
@@ -240,6 +244,176 @@ get_ftp_free_space() {
     echo $free_space
 }
 
+# --- ХЕШ-ВЕРИФИКАЦИЯ ЗАГРУЖЕННОГО ФАЙЛА ---
+# Стратегия (по убыванию надёжности):
+#   (a) серверный hash (XSHA256/XMD5/HASH) — почти не встречается на Android-FTP;
+#   (b) head-чанк через `curl | head -c` — обрывает поток через SIGPIPE, REST не нужен;
+#   (c) tail-чанк через `curl --range` — нужен REST; если сервер не умеет, пропускаем.
+#
+# Возвращаемые коды verify_remote_hash:
+#   0  — хеш сошёлся (full / head+tail / только head — всё ок)
+#   1  — реальный MISMATCH (файл повреждён → cleanup_ftp в caller)
+#   2  — не удалось получить хеш с сервера (warn-only, файл НЕ удаляем)
+
+# NB: все эти функции — subshell-функции (`f() ( ... )`), флаги set -e/pipefail
+# изменяются локально и не утекают к caller'у. Все скачивания идут через lftp
+# (а не curl), потому что lftp работает с raw filename через `cd` + `cat`/`get`,
+# без URL-кодирования — что критично для имён с пробелами/скобками/русскими/!?.
+
+# Удалённый head sha256: lftp cat | head -c. head закрывает pipe → lftp получает
+# SIGPIPE и аккуратно прерывает RETR. REST на сервере не нужен.
+remote_head_hash() (
+    set +e
+    set +o pipefail
+    local remote_dir="$1" remote_file="$2" size="$3"
+    local tmp got expected cd_cmd=""
+    expected=$(( size < HASH_CHUNK ? size : HASH_CHUNK ))
+    tmp=$(mktemp)
+    [[ -n "$remote_dir" ]] && cd_cmd="cd \"$remote_dir\"; "
+
+    # NB: lftp -e не понимает переводы строк как разделители команд — только ;
+    timeout 180 lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" \
+        -e "set net:timeout 30; set net:max-retries 1; ${cd_cmd}cat -- \"$remote_file\"; quit" \
+        2>/dev/null | head -c "$expected" > "$tmp"
+
+    got=$(stat -c %s "$tmp" 2>/dev/null || echo 0)
+    if [[ "$got" -eq "$expected" && "$expected" -gt 0 ]]; then
+        sha256sum "$tmp" | awk '{print $1}'
+    fi
+    rm -f "$tmp"
+)
+
+# Удалённый tail sha256: трюк с lftp get -c. Создаём локальный stub размером
+# (size - HASH_CHUNK), и lftp видит его как «частично скачанный», досылает
+# через REST оставшиеся байты. Если сервер не умеет REST — итоговый размер
+# отличается от $size, и мы возвращаем пусто.
+remote_tail_hash() (
+    set +e
+    set +o pipefail
+    local remote_dir="$1" remote_file="$2" size="$3"
+    [[ "$size" -le "$HASH_CHUNK" ]] && exit 0
+    local tmp final_size off cd_cmd=""
+    off=$(( size - HASH_CHUNK ))
+    tmp=$(mktemp)
+    [[ -n "$remote_dir" ]] && cd_cmd="cd \"$remote_dir\"; "
+
+    # sparse-файл ровно нужного размера
+    truncate -s "$off" "$tmp"
+
+    # NB: НЕ выставляем xfer:clobber on — иначе lftp при отсутствии REST
+    # на сервере молча перезапишет stub целиком, и мы решим что resume сработал.
+    # Без clobber: если REST не работает, lftp откажется и оставит stub как есть.
+    # Защита от ложного срабатывания: записываем уникальный маркер в начало
+    # stub'а; если после lftp маркер сохранился, значит сервер действительно
+    # ответил по REST и дописал только хвост.
+    local marker marker_hash actual_head_hash
+    marker=$(head -c 256 /dev/urandom | base64 | head -c 256)
+    printf '%s' "$marker" | dd of="$tmp" bs=256 count=1 conv=notrunc 2>/dev/null
+    marker_hash=$(printf '%s' "$marker" | sha256sum | awk '{print $1}')
+
+    timeout 180 lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" \
+        -e "set net:timeout 30; set net:max-retries 1; ${cd_cmd}get -c \"$remote_file\" -o \"$tmp\"; quit" \
+        2>/dev/null
+
+    final_size=$(stat -c %s "$tmp" 2>/dev/null || echo 0)
+    actual_head_hash=$(head -c 256 "$tmp" 2>/dev/null | sha256sum | awk '{print $1}')
+
+    if [[ "$final_size" -eq "$size" && "$actual_head_hash" == "$marker_hash" ]]; then
+        # REST реально сработал: голова не тронута, хвост дописан → читаем хвост.
+        tail -c "$HASH_CHUNK" "$tmp" | sha256sum | awk '{print $1}'
+    fi
+    rm -f "$tmp"
+)
+
+# Пробует серверный hash. stdout формата "algo:hexhash" или ничего.
+try_server_hash() (
+    set +e
+    set +o pipefail
+    local remote_dir="$1" remote_file="$2"
+    local out hash
+
+    out=$(lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" \
+               -e "cd \"$remote_dir\"; quote XSHA256 \"$remote_file\"; quit" 2>&1)
+    hash=$(echo "$out" | grep -oE '[0-9a-fA-F]{64}' | head -1)
+    if [[ -n "$hash" ]]; then
+        echo "sha256:${hash,,}"; exit 0
+    fi
+
+    out=$(lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" \
+               -e "cd \"$remote_dir\"; quote XMD5 \"$remote_file\"; quit" 2>&1)
+    hash=$(echo "$out" | grep -oE '[0-9a-fA-F]{32}' | head -1)
+    if [[ -n "$hash" ]]; then
+        echo "md5:${hash,,}"; exit 0
+    fi
+
+    out=$(lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" \
+               -e "cd \"$remote_dir\"; quote OPTS HASH SHA-256; quote HASH \"$remote_file\"; quit" 2>&1)
+    hash=$(echo "$out" | grep -oE '[0-9a-fA-F]{64}' | head -1)
+    if [[ -n "$hash" ]]; then
+        echo "sha256:${hash,,}"; exit 0
+    fi
+    exit 1
+)
+
+# Главная функция: 0=OK, 1=MISMATCH, 2=can't verify.
+verify_remote_hash() (
+    set +e
+    set +o pipefail
+    local local_path="$1" remote_dir="$2" remote_file="$3" local_size="$4"
+    local server_hash algo rhash lhash
+
+    # (a) серверный hash
+    if server_hash=$(try_server_hash "$remote_dir" "$remote_file"); then
+        algo="${server_hash%%:*}"; rhash="${server_hash#*:}"
+        if [[ "$algo" == "sha256" ]]; then
+            lhash=$(sha256sum "$local_path" | awk '{print $1}')
+        else
+            lhash=$(md5sum "$local_path" | awk '{print $1}')
+        fi
+        lhash="${lhash,,}"
+        if [[ "$lhash" == "$rhash" ]]; then
+            echo "[VERIFY] server-${algo}: OK"; exit 0
+        fi
+        echo "[VERIFY] server-${algo}: MISMATCH (local=$lhash remote=$rhash)"
+        exit 1
+    fi
+
+    # (b) head check — стримим через curl, обрываем head -c
+    local local_head remote_head local_tail remote_tail
+    local_head=$(head -c "$HASH_CHUNK" "$local_path" 2>/dev/null | sha256sum | awk '{print $1}')
+    remote_head=$(remote_head_hash "$remote_dir" "$remote_file" "$local_size")
+    if [[ -z "$remote_head" ]]; then
+        echo "[VERIFY] head: не удалось скачать чанк — хеш не проверен (size совпал)"
+        exit 2
+    fi
+    if [[ "$local_head" != "$remote_head" ]]; then
+        echo "[VERIFY] head sha256: MISMATCH"
+        echo "  local =$local_head"
+        echo "  remote=$remote_head"
+        exit 1
+    fi
+
+    # (c) tail check — нужен REST. Если сервер не умеет — принимаем по size+head.
+    if (( local_size > HASH_CHUNK )); then
+        local_tail=$(tail -c "$HASH_CHUNK" "$local_path" 2>/dev/null | sha256sum | awk '{print $1}')
+        remote_tail=$(remote_tail_hash "$remote_dir" "$remote_file" "$local_size")
+        if [[ -z "$remote_tail" ]]; then
+            echo "[VERIFY] head sha256: OK; tail недоступен (REST?) — принято по size+head"
+            exit 0
+        fi
+        if [[ "$local_tail" != "$remote_tail" ]]; then
+            echo "[VERIFY] tail sha256: MISMATCH"
+            echo "  local =$local_tail"
+            echo "  remote=$remote_tail"
+            exit 1
+        fi
+        echo "[VERIFY] head+tail sha256: OK"
+    else
+        echo "[VERIFY] head sha256: OK (файл ≤ chunk)"
+    fi
+    exit 0
+)
+
 # Функция для удаления файла с сервера (очистка при ошибке)
 cleanup_ftp() {
     echo "[SYNC] Обнаружена ошибка или несовпадение размера. Удаляем некорректный файл $ftp_safe_name с сервера..."
@@ -300,7 +474,7 @@ check_and_copy_file() {
 #    fi
 
     # Если место достаточно, копируем файл
-    echo "[SYNC] Копирую $orig_filepath → $ftp_target_dir/$ftp_safe_name"
+    echo -e "\n[SYNC] Копирую $orig_filepath → $ftp_target_dir/$ftp_safe_name"
 
     # Вызов функции для создания директорий (если нужно)
     ftp_mkdirs "$ftp_target_dir"
@@ -367,7 +541,18 @@ EOF
           cleanup_ftp
 #          return 1
       else
-          echo "[SYNC] Файл успешно скопирован и проверен."
+          # Размер сошёлся — верифицируем хешем.
+          # Коды: 0=ok, 1=реальный mismatch (удалить), 2=нет возможности проверить (warn).
+          set +e
+          verify_remote_hash "$orig_filepath" "$ftp_target_dir" "$ftp_safe_name" "$local_size"
+          vrc=$?
+          set -e
+          case "$vrc" in
+              0) echo "[SYNC] Файл успешно скопирован и проверен (size+hash).";;
+              2) echo -e "\033[33m[WARN] Файл скопирован, размеры совпали, но хеш не проверен (ограничения сервера).\033[0m";;
+              *) echo -e "\n[ERROR] Хеш не совпал — файл повреждён при передаче."
+                 cleanup_ftp;;
+          esac
       fi
 
     fi

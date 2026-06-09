@@ -20,4 +20,5 @@ https://www.youtube.com/@vikdovnar/videos
 https://www.youtube.com/@vdud/videos
 https://www.youtube.com/@oskar_hartmann1/videos
 # https://www.youtube.com/@PavelShchelin/videos
-https://www.youtube.com/@sbelonozhko/videos
+# https://www.youtube.com/@sbelonozhko/videos
+https://www.youtube.com/@noosphereproject/videos

@@ -41,4 +41,9 @@ YouTube video downloading and management pipeline with FTP sync to a mobile devi
 # Transcribe a video
 ./transcribe1.sh /path/to/video.mp4
 ./transcribe1.sh --force --format=flac /path/to/video.mp4
+
+# Direct download by URL (480p, requires --remote-components for YouTube n-challenge)
+yt-dlp --cookies-from-browser firefox --remote-components ejs:github \
+  -f "bestvideo[height<=480]+bestaudio/best[height<=480]/best" \
+  -o "%(title)s.%(ext)s" URL [URL...]
 ```

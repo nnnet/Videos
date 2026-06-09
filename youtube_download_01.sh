@@ -24,6 +24,24 @@ echo ""
 echo ""
 echo "--- Start download $(date '+%Y-%m-%d %H:%M:%S') ---"
 
+# === Anti-race: ждём пока сеть доступна (до 5 мин) ===
+# При запуске из cron VPN/TUN routing может ещё переустанавливаться, и
+# yt-dlp получит "Network is unreachable" / SSL EOF. Проверяем что
+# youtube.com отвечает прежде чем стартовать (cron-incident 2026-05-29).
+WAIT_MAX=300
+WAIT_INTERVAL=10
+elapsed=0
+while ! curl --max-time 10 -fsS -o /dev/null https://www.youtube.com 2>/dev/null; do
+    if [ "$elapsed" -ge "$WAIT_MAX" ]; then
+        echo "FATAL: youtube.com недоступен после ${WAIT_MAX}с ожидания — выход" >&2
+        exit 1
+    fi
+    echo "Сеть/VPN не готова (curl youtube.com failed), жду ${WAIT_INTERVAL}с... ${elapsed}/${WAIT_MAX}"
+    sleep "$WAIT_INTERVAL"
+    elapsed=$(( elapsed + WAIT_INTERVAL ))
+done
+echo "Сеть OK через ${elapsed}с"
+
 cd /mnt/82A23910A2390A65/Videos/
 
 # ==============================================================================
@@ -113,6 +131,126 @@ if ! command -v ffmpeg &> /dev/null; then
     exit 1
 fi
 
+if ! command -v ffprobe &> /dev/null; then
+    echo -e "\033[31m❌ Ошибка: ffprobe не найден (входит в пакет ffmpeg).\033[0m" >&2
+    echo "--- End download $(date '+%Y-%m-%d %H:%M:%S') ---"
+    exit 1
+fi
+
+# --- ПРОВЕРКА A/V КАЧЕСТВА СКАЧАННОГО MP4 ---
+# Возвращает 0 если файл содержит и video, и audio поток с близкими длительностями.
+# Возвращает 1 в любом другом случае (нет потока, обрыв, не открывается).
+verify_av_streams() {
+    local file="$1"
+    local has_video has_audio
+    has_video=$(ffprobe -v error -select_streams v:0 \
+                        -show_entries stream=codec_type \
+                        -of default=nw=1:nk=1 "$file" 2>/dev/null || true)
+    has_audio=$(ffprobe -v error -select_streams a:0 \
+                        -show_entries stream=codec_type \
+                        -of default=nw=1:nk=1 "$file" 2>/dev/null || true)
+    [[ "$has_video" != "video" ]] && return 1
+    [[ "$has_audio" != "audio" ]] && return 1
+
+    local v_dur a_dur fmt_dur
+    v_dur=$(ffprobe -v error -select_streams v:0 \
+                    -show_entries stream=duration \
+                    -of default=nw=1:nk=1 "$file" 2>/dev/null || true)
+    a_dur=$(ffprobe -v error -select_streams a:0 \
+                    -show_entries stream=duration \
+                    -of default=nw=1:nk=1 "$file" 2>/dev/null || true)
+    fmt_dur=$(ffprobe -v error -show_entries format=duration \
+                      -of default=nw=1:nk=1 "$file" 2>/dev/null || true)
+    [[ -z "$v_dur" || "$v_dur" == "N/A" ]] && v_dur="$fmt_dur"
+    [[ -z "$a_dur" || "$a_dur" == "N/A" ]] && a_dur="$fmt_dur"
+    [[ -z "$v_dur" || -z "$a_dur" ]] && return 1
+
+    awk -v v="$v_dur" -v a="$a_dur" 'BEGIN{
+        d = v - a; if (d < 0) d = -d;
+        # допуск 1.5 сек: достаточно для нормальных контейнеров
+        exit (d <= 1.5) ? 0 : 1
+    }'
+}
+
+# Чистит мусор от незавершённых загрузок и битые mp4.
+# - Whitelist «мусорных» расширений (защищает PDF/XLSX/DOCX и пр. курсы);
+# - Если удалённый файл имеет [id] и нет сопутствующего mp4 — id убирается из архива;
+# - Каждый mp4 верифицируется ffprobe (video+audio, длительности ±1.5с).
+verify_and_clean_channel() {
+    local channel_dir="$1"
+    [[ ! -d "$channel_dir" ]] && return 0
+
+    echo "→ $(basename "$channel_dir")"
+
+    # 1. Собрать ID для которых есть mp4 (рекурсивно по дереву канала)
+    declare -A has_mp4=()
+    local mp4 fname id
+    while IFS= read -r -d '' mp4; do
+        fname=$(basename "$mp4")
+        if [[ "$fname" =~ \[([a-zA-Z0-9_-]{11})\]\.mp4$ ]]; then
+            has_mp4["${BASH_REMATCH[1]}"]=1
+        fi
+    done < <(find "$channel_dir" -type f -name '*.mp4' -print0)
+
+    # 2. Удалить файлы по whitelist «мусорных» расширений.
+    #    Если у файла есть [id] и mp4 с таким id отсутствует — убрать id из архива.
+    local removed=0 archive_purged=0 f
+    while IFS= read -r -d '' f; do
+        fname=$(basename "$f")
+        if [[ "$fname" =~ \[([a-zA-Z0-9_-]{11})\]\.[^/]+$ ]]; then
+            id="${BASH_REMATCH[1]}"
+            if [[ -z "${has_mp4[$id]:-}" ]]; then
+                if [[ -f "$ARCHIVE_FILE" ]] && grep -qE "^youtube[[:space:]]+${id}\$" "$ARCHIVE_FILE"; then
+                    sed -i "/^youtube[[:space:]]\+${id}\$/d" "$ARCHIVE_FILE"
+                    archive_purged=$((archive_purged + 1))
+                fi
+            fi
+        fi
+        rm -f "$f"
+        removed=$((removed + 1))
+    done < <(find "$channel_dir" -type f \( \
+            -name '*.part' -o \
+            -name '*.ytdl' -o \
+            -name '*.m4a' -o \
+            -name '*.webm' -o \
+            -name '*.flac' -o \
+            -name '*.opus' -o \
+            -name '*.wav' -o \
+            -name '*.mkv' -o \
+            -name '*.aac' -o \
+            -name '*.ogg' -o \
+            -name '*.ts' -o \
+            -name '*.temp.*' -o \
+            -name '*.f[0-9]*.mp4' -o \
+            -name '*.f[0-9]*.webm' -o \
+            -name '*.f[0-9]*.m4a' \
+        \) -print0)
+
+    [[ $removed -gt 0 ]] && echo "   мусор удалён: $removed файл(ов); из архива убрано: $archive_purged ID"
+
+    # 3. Проверить каждый mp4 на наличие video+audio и совпадение длительностей
+    local broken=0
+    while IFS= read -r -d '' mp4; do
+        if verify_av_streams "$mp4"; then
+            continue
+        fi
+        fname=$(basename "$mp4")
+        echo -e "\033[31m   ❌ [BROKEN] $fname\033[0m"
+        # ID может быть в любом месте имени: name [ID].mp4 или name [ID].fNNN.mp4
+        if [[ "$fname" =~ \[([a-zA-Z0-9_-]{11})\] ]]; then
+            id="${BASH_REMATCH[1]}"
+            if [[ -f "$ARCHIVE_FILE" ]] && grep -qE "^youtube[[:space:]]+${id}\$" "$ARCHIVE_FILE"; then
+                sed -i "/^youtube[[:space:]]\+${id}\$/d" "$ARCHIVE_FILE"
+                echo "   ⤷ ID $id убран из архива — будет перекачан"
+            fi
+        fi
+        rm -f "$mp4"
+        broken=$((broken + 1))
+    done < <(find "$channel_dir" -type f -name '*.mp4' -print0)
+
+    [[ $broken -gt 0 ]] && echo "   битых mp4 удалено: $broken"
+}
+
 # Создаем базовую директорию, если она не существует
 mkdir -p "$BASE_DIR"
 
@@ -137,7 +275,11 @@ fi
 # Создаем временные файлы и гарантируем их удаление при выходе
 INITIAL_LIST_FILE=$(mktemp)
 FINAL_LIST_FILE=$(mktemp)
-trap 'rm -f "$INITIAL_LIST_FILE" "$FINAL_LIST_FILE"' EXIT
+# Сюда yt-dlp будет писать финальные пути каждого смерджённого видео
+# (через --print-to-file "after_move:%(filepath)s"). По этим путям после загрузки
+# мы поймём ровно те папки каналов, в которые шла запись.
+DOWNLOADED_PATHS_FILE=$(mktemp)
+trap 'rm -f "$INITIAL_LIST_FILE" "$FINAL_LIST_FILE" "$DOWNLOADED_PATHS_FILE"' EXIT
 
 
 # --- ЭТАП 1: ПОИСК НОВЫХ ВИДЕО ---
@@ -164,13 +306,17 @@ while IFS= read -r channel_url || [[ -n "$channel_url" ]]; do
     /home/uadmin/.local/bin/yt-dlp \
         --js-runtimes quickjs \
         --remote-components ejs:github \
-        --get-id \
+        --flat-playlist \
         --lazy-playlist \
-        --break-on-reject \
+        --print "%(id)s" \
+        --break-on-existing \
         --download-archive "$ARCHIVE_FILE" \
-        --dateafter "now-${MAX_VIDEO_AGE}" \
+        --playlist-end 30 \
+        --extractor-args "youtubetab:skip=authcheck" \
+        --socket-timeout 60 \
+        --retries 10 \
         --cookies-from-browser firefox \
-        "$channel_url" < /dev/null >> "$INITIAL_LIST_FILE"
+        "$channel_url" < /dev/null >> "$INITIAL_LIST_FILE" || true
 
     # Увеличиваем счетчик на 1 в начале каждой итерации
     ((index++))
@@ -255,17 +401,13 @@ echo "Итого к загрузке: $VIDEO_COUNT видео."
 echo "---------------------------------"
 echo ""
 
-# Создаем список каналов, куда было загружено видео
-channels_to_clean=()
-
-
 if [ "$VIDEO_COUNT" -gt 0 ]; then
   echo "Начинаю загрузку с паузами от $MIN_SLEEP до $MAX_SLEEP секунд между видео..."
 
   # Создаем временную директорию для файлов-батчей
   # Она будет автоматически удалена при выходе из скрипта
   TEMP_DIR=$(mktemp -d)
-  trap 'echo "=> Очистка временных файлов..."; rm -rf -- "$TEMP_DIR"' EXIT
+  trap 'echo "=> Очистка временных файлов..."; rm -f "$INITIAL_LIST_FILE" "$FINAL_LIST_FILE" "$DOWNLOADED_PATHS_FILE"; rm -rf -- "$TEMP_DIR"' EXIT
 
   echo "=> Исходный файл: $FINAL_LIST_FILE"
   echo "=> Размер пакета: $URLS_BATCH_SIZE"
@@ -295,49 +437,31 @@ if [ "$VIDEO_COUNT" -gt 0 ]; then
 
       # ЗАПУСК КОМАНДЫ YT-DLP ДЛЯ ТЕКУЩЕГО ПАКЕТА
       /home/uadmin/.local/bin/yt-dlp \
-          --verbose \
+          --js-runtimes quickjs \
+          --remote-components ejs:github \
           --ignore-errors \
           --no-overwrites \
           --batch-file "$batch_file" \
           --download-archive "$ARCHIVE_FILE" \
           --cookies-from-browser firefox \
+          --extractor-args "youtubetab:skip=authcheck" \
+          --socket-timeout 60 \
+          --retries 10 \
+          --fragment-retries 10 \
           --sleep-interval "$MIN_SLEEP" \
           --max-sleep-interval "$MAX_SLEEP" \
+          --match-filter "!is_live & !was_live & live_status != 'is_upcoming'" \
           --format 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best[height<=480]' \
           --merge-output-format mp4 \
           --output "$BASE_DIR/%(channel)s/%(title)s [%(id)s].%(ext)s" \
+          --print-to-file "after_move:%(filepath)s" "$DOWNLOADED_PATHS_FILE" \
           ;
 
       if [ $? -ne 0 ]; then
           echo "ВНИМАНИЕ: yt-dlp завершился с ошибкой при обработке пакета $current_batch_num. Продолжаем со следующим пакетом из-за опции --ignore-errors."
       fi
-
-      # Добавляем канал в список для очистки после загрузки
-      # Извлекаем имя канала на основе URL
-      # Предполагается, что канал всегда имеет формат https://www.youtube.com/@channelname/videos
-
-      echo "batch_file=$batch_file"
-      # channel_dir=$(dirname "$BASE_DIR/$(basename $(head -n 1 "$batch_file"))")
-      channel_url=$(head -n 1 "$batch_file")
-      echo "channel_url=$channel_url"
-
-      # Проверяем, что это действительно канал (по URL)
-      if [[ "$channel_url" =~ https?://(www\.)?youtube\.com/@([^/]+) ]]; then
-          channel_name="${BASH_REMATCH[2]}"  # Имя канала (канал в URL)
-          channel_dir="$BASE_DIR/$channel_name"
-
-          # Добавляем канал в список, если он еще не был добавлен
-          if [[ ! " ${channels_to_clean[@]} " =~ " ${channel_dir} " ]]; then
-              channels_to_clean+=("$channel_dir")
-              echo "$channel_dir добавлен в список для очистки"
-          else
-            echo "❌ $channel_dir не добавлен в список для очистки"
-            echo -e "\033[31m❌ $channel_dir не добавлен в список для очистки\033[0m"
-          fi
-      else
-        echo "❌ $channel_url не является папкой"
-        echo -e "\033[31m❌ $channel_url не является папкой\033[0m"
-      fi
+      # Папки каналов, в которые шла запись, мы узнаём из $DOWNLOADED_PATHS_FILE
+      # после всех батчей — не нужно угадывать по URL.
       echo ""
   done
 
@@ -350,22 +474,31 @@ else
   echo "--- Загрузка отменена ---"
 fi
 
-# Шаг 3: Очистка ненужных файлов внутри каналов, куда были скачаны видео
-# Проверяем длину массива channels_to_clean
-if [ ${#channels_to_clean[@]} -gt 0 ]; then
-    echo "Очистка ненужных файлов внутри загруженных каналов..."
+# Шаг 3: Очистка мусора + проверка A/V целостности.
+# Берём ровно те папки каналов, в которые писал yt-dlp в этом запуске:
+# из $DOWNLOADED_PATHS_FILE (наполняется флагом --print-to-file after_move).
+if [[ -s "$DOWNLOADED_PATHS_FILE" ]]; then
+    echo "Очистка мусора и проверка A/V целостности в папках с новыми загрузками..."
 
-    for channel_dir in "${channels_to_clean[@]}"; do
-        echo "Очищаю канал: $channel_dir"
-        # Удаляем все файлы, не являющиеся .mp4 внутри канала
-        find "$channel_dir" -type f ! -name "*.mp4" -exec rm -f {} \;
+    declare -A channels_seen=()
+    while IFS= read -r filepath; do
+        [[ -z "$filepath" ]] && continue
+        chan_dir=$(dirname "$filepath")
+        # Защита: убедимся, что путь внутри $BASE_DIR
+        case "$chan_dir/" in
+            "$BASE_DIR"/*) channels_seen["$chan_dir"]=1 ;;
+        esac
+    done < "$DOWNLOADED_PATHS_FILE"
+
+    cleaned_count=0
+    for chan_dir in "${!channels_seen[@]}"; do
+        verify_and_clean_channel "$chan_dir"
+        cleaned_count=$((cleaned_count + 1))
     done
 
-#    echo "✅ Очистка завершена."
-    echo -e "\033[32m✅ Очистка завершена.\033[0m"
+    echo -e "\033[32m✅ Очистка и проверка завершены ($cleaned_count папок).\033[0m"
 else
-#    echo "Нет каналов для очистки. Пропускаю этап очистки."
-    echo -e "\033[31m❌ Очистка не выполнена: нет каналов для очистки.\033[0m"
+    echo "Пропускаю очистку: новых файлов в этом запуске не было."
 fi
 
 echo "--- End download $(date '+%Y-%m-%d %H:%M:%S') ---"
