@@ -1,5 +1,45 @@
 #!/usr/bin/env bash
 
+# PO Token (2026-06-20): YouTube требует PO Token, иначе бот-капча "Sign in to
+# confirm you're not a bot". Локальный bgutil-сервер (:4416) генерит токен;
+# yt-dlp берёт его автоматически.
+# no_proxy ОБЯЗАТЕЛЕН — иначе yt-dlp лезет на свой же 127.0.0.1:4416 через
+# датацентровый прокси (localhost:3128) и не достучится.
+export no_proxy="127.0.0.1,localhost,::1,${no_proxy:-}"
+export NO_PROXY="$no_proxy"
+
+# --- PO Token сервер: поднимаем НА ВРЕМЯ загрузки, гасим в конце ---------------
+# Не держим постоянный systemd-сервис (просьба не загромождать хост). Сервер
+# стартует здесь, trap EXIT гарантированно убивает его при любом выходе
+# (успех/ошибка/Ctrl-C). Если порт уже занят (ручной запуск / параллельный
+# прогон) — не плодим второй, переиспользуем существующий.
+POT_DIR="/home/uadmin/bgutil-ytdlp-pot-provider/server"
+POT_PORT=4416
+POT_PID=""
+_pot_up() { curl -s --max-time 3 "http://127.0.0.1:$POT_PORT/ping" 2>/dev/null | grep -q server_uptime; }
+_pot_stop() {
+    if [ -n "$POT_PID" ] && kill -0 "$POT_PID" 2>/dev/null; then
+        kill "$POT_PID" 2>/dev/null
+        echo "PO Token сервер остановлен (pid $POT_PID)."
+    fi
+}
+if _pot_up; then
+    echo "PO Token сервер уже запущен на :$POT_PORT — переиспользую."
+elif [ -f "$POT_DIR/build/main.js" ]; then
+    node "$POT_DIR/build/main.js" >/tmp/bgutil-pot.log 2>&1 &
+    POT_PID=$!
+    trap '_pot_stop' EXIT
+    for i in 1 2 3 4 5 6 7 8 9 10; do _pot_up && break; sleep 0.5; done
+    if _pot_up; then
+        echo "PO Token сервер запущен (pid $POT_PID, :$POT_PORT)."
+    else
+        echo "ВНИМАНИЕ: PO Token сервер не поднялся за 5с — YouTube может дать бот-капчу. См /tmp/bgutil-pot.log" >&2
+    fi
+else
+    echo "ВНИМАНИЕ: нет $POT_DIR/build/main.js — PO Token сервер не запущен, возможна бот-капча." >&2
+fi
+# ------------------------------------------------------------------------------
+
 # Обновляем yt-dlp
 # pip install -U --break-system-packages yt-dlp
 
@@ -402,6 +442,21 @@ echo "---------------------------------"
 echo ""
 
 if [ "$VIDEO_COUNT" -gt 0 ]; then
+  # Префлайт: YouTube блокирует датацентровые/VPN IP бот-капчей независимо от
+  # кук (диагностика 2026-06-20: весь трафик уходил через Happ VPN → Hetzner,
+  # exit 95.217.241.97 → "Sign in to confirm you're not a bot"). Сам не падаем,
+  # но пишем громкую причину в лог, чтобы сбой читался сразу, а не как спам
+  # бот-капчи по каждому видео. Фикс — split-tunnel youtube в Happ (geosite:youtube
+  # → direct), тогда exit становится домашним.
+  exit_org=$(timeout 10 curl -s "https://ipinfo.io/org" 2>/dev/null)
+  if printf '%s' "$exit_org" | grep -qiE 'hetzner|ovh|digitalocean|linode|vultr|amazon|google cloud|datacenter|m247|leaseweb|contabo'; then
+      echo "ВНИМАНИЕ: внешний IP — датацентр/VPN ($exit_org). YouTube почти наверняка"
+      echo "         отдаст бот-капчу. Нужен split-tunnel youtube в Happ (geosite:youtube → direct)"
+      echo "         или пауза VPN на время загрузки. Продолжаю попытку, но возможен провал."
+  else
+      echo "Префлайт OK: внешний IP не датацентр (${exit_org:-неизвестно})."
+  fi
+
   echo "Начинаю загрузку с паузами от $MIN_SLEEP до $MAX_SLEEP секунд между видео..."
 
   # Создаем временную директорию для файлов-батчей
@@ -441,6 +496,7 @@ if [ "$VIDEO_COUNT" -gt 0 ]; then
           --remote-components ejs:github \
           --ignore-errors \
           --no-overwrites \
+	  --cookies-from-browser firefox \
           --batch-file "$batch_file" \
           --download-archive "$ARCHIVE_FILE" \
           --cookies-from-browser firefox \

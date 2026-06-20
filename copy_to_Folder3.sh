@@ -30,6 +30,17 @@ EXCLUDE_EXTENSIONS=(
     # сюда можно добавить другие расширения (через точку)
 )
 
+#LFTP_BASE="
+#set ssl:verify-certificate no
+#set net:timeout 10
+#set net:max-retries 2
+#"
+
+export LFTP_CMD="
+set ssl:verify-certificate no
+set ftp:ssl-allow yes
+"
+
 should_exclude() {
     local filename="$1"
     for ext in "${EXCLUDE_EXTENSIONS[@]}"; do
@@ -507,6 +518,11 @@ check_and_copy_file() {
     local_size=$(stat -c %s "$orig_filepath")
     echo "[SYNC] Размер локального файла: $local_size байт"
 
+    # mtime источника в UTC для MFMT: иначе Android FTP-сервер ставит файлу
+    # своё локальное время и отдаёт его в листинге как UTC → клиенты
+    # показывают время со сдвигом +3ч (баг подтверждён 2026-06-10).
+    local_mfmt=$(date -u -r "$orig_filepath" +%Y%m%d%H%M%S)
+
     # 2. Загрузка файла на сервер
     set +e
     timeout 600 lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" <<EOF > /tmp/lftp_put_out.txt 2>&1
@@ -515,6 +531,7 @@ set net:timeout 10
 set net:max-retries 2
 cd "$ftp_target_dir"
 put "$orig_filepath" -o "$ftp_safe_name"
+quote MFMT $local_mfmt "$ftp_safe_name"
 ls -l "$ftp_safe_name"
 EOF
     ret=$?
