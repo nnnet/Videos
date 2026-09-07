@@ -1,0 +1,35 @@
+restore-google-calendars.sh
+  s_c345c8fa57a7d3::t_bd7121523cec48 463,467,472-474
+  s_c345c8fa57a7d3::t_eb1e4a46e30286 398
+  s_c345c8fa57a7d3::t_ae7dec45139b5c 665
+  s_c345c8fa57a7d3::t_dd02a81d58eeaf 614-621
+  s_c345c8fa57a7d3::t_c857ed947646b0 97-98
+  s_c345c8fa57a7d3::t_6e4dd2ddef2231 677
+  s_c345c8fa57a7d3::t_7e52856c4d2a1e 678
+  s_c345c8fa57a7d3::t_0d8078f8f8c489 561,568-569,573
+  s_c345c8fa57a7d3::t_1373142896cb8c 88
+  s_c345c8fa57a7d3::t_7a7614717cb0da 591,593-613,622-625,628-629
+  s_c345c8fa57a7d3::t_5aba5784e430b3 654,656,659
+  s_c345c8fa57a7d3::t_4e7bfefcd068ea 368-391
+  s_c345c8fa57a7d3::t_f9774984dec459 7,9-25,33-34,45-46
+  s_c345c8fa57a7d3::t_81f64cf635efed 200-347
+  s_c345c8fa57a7d3::t_6b2a4096b17ef7 502,508-541,544-554
+  s_c345c8fa57a7d3::t_beae451c2ce459 77
+  s_c345c8fa57a7d3::t_cc576d804eec5a 70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "3191a500618f8f00f42b2da1fad007ed0ce45aa3",
+  "prompts": {},
+  "sessions": {
+    "s_c345c8fa57a7d3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bd13287b-d1cd-485c-91a2-62ab36d5ee96",
+        "model": "claude-opus-5"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
