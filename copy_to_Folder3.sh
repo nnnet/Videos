@@ -28,6 +28,10 @@ EXCLUDE_EXTENSIONS=(
     ".f140.m4a"
     ".tmp"
     # сюда можно добавить другие расширения (через точку)
+   ".sh"
+   ".txt"
+   ".png"
+   ".ru.vtt"
 )
 
 #LFTP_BASE="
@@ -58,33 +62,39 @@ DIR_LIST=$(mktemp)
 echo "[TRACE] Формируем выражение для исключений..."
 
 # Собираем исключающие пути
+# 1. Правильно собираем исключения путей (группируем их в скобки)
 EXCLUDE_EXPR=()
-for path in "${EXCLUDE_PATHS[@]}"; do
-    EXCLUDE_EXPR+=( -path "$SOURCE_DIR/$path" -prune -o )
-    echo "[DEBUG] Добавляем исключение: $SOURCE_DIR/$path"
+if [ ${#EXCLUDE_PATHS[@]} -gt 0 ]; then
+    EXCLUDE_EXPR+=( \( )
+    for path in "${EXCLUDE_PATHS[@]}"; do
+        EXCLUDE_EXPR+=( -path "$SOURCE_DIR/$path" -o )
+    done
+    unset 'EXCLUDE_EXPR[${#EXCLUDE_EXPR[@]}-1]' # Удаляем последний лишний '-o'
+    EXCLUDE_EXPR+=( \) -prune -o )
+fi
+
+# 2. Правильно собираем исключения расширений в массив
+FILTER_EXTS=()
+for ext in "${EXCLUDE_EXTENSIONS[@]}"; do
+    FILTER_EXTS+=( ! -iname "*$ext" )
 done
 
 echo "[TRACE] Запускаем find для поиска файлов новее 3 месяцев..."
 DATE_LIMIT=$(date --date="$DAYS_AGO days ago" +'%Y-%m-%d')
 
-# Находим все файлы новее 3 месяцев с исключениями
-
-
-DATE_LIMIT=$(date --date="$DAYS_AGO days ago" +'%Y-%m-%d')
-
 TMP_SORTED=$(mktemp)
 
 
+# 3. Вызываем find с правильными массивами в кавычках
 find "$SOURCE_DIR" \
-    ${EXCLUDE_EXPR[@]} \
+    "${EXCLUDE_EXPR[@]}" \
     -type f -newermt "$DATE_LIMIT" \
-    $(for ext in "${EXCLUDE_EXTENSIONS[@]}"; do echo "! -iname *$ext"; done) \
+    "${FILTER_EXTS[@]}" \
     -printf '%T@ %p\0' 2>/dev/null |
   sort -z -k1,1nr |
   awk -v RS='\0' -v src="$SOURCE_DIR/" '
     {
       if ($0 == "") next
-      # отделяем метку времени только по ПЕРВОМУ пробелу, всё остальное = путь
       time_and_path = $0
       space = index(time_and_path, " ")
       if (!space) next
@@ -97,6 +107,8 @@ find "$SOURCE_DIR" \
 
 
 
+echo "2"
+
 # cat $TMP_SORTED
 # 2. Перебираем этот файл, обеспечивая строгую безопасность:
 > "$FILE_LIST"
@@ -107,6 +119,8 @@ tr '\0' '\n' < "$TMP_SORTED" > "$FILE_LIST"
 cat $FILE_LIST
 
 # exit
+
+echo "3"
 
 FILE_COUNT=$(wc -l < "$FILE_LIST")
 echo -e "\n[INFO] Найдено $FILE_COUNT файлов новее 3 месяцев"
