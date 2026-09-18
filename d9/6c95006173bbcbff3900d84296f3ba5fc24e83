@@ -1,0 +1,23 @@
+.claude/plans/2026-09-19T00-10__claude-global-env-foundation.md
+  s_c2f4086715ffb6::t_f75fea8a563bb1 212
+  s_c2f4086715ffb6::t_ecbc01ff006240 477
+  s_c2f4086715ffb6::t_3ca8ec7f42769e 210
+  s_c2f4086715ffb6::t_e4bb9c835f6237 494-500
+  s_c2f4086715ffb6::t_bfde5b0e885c5f 221-222,226-227,233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d96c95006173bbcbff3900d84296f3ba5fc24e83",
+  "prompts": {},
+  "sessions": {
+    "s_c2f4086715ffb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e66635e-315f-45ed-a57a-c66feb2a16e2",
+        "model": "claude-opus-5"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
