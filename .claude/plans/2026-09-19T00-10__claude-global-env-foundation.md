@@ -1,0 +1,546 @@
+# Глобальная платформа для всех сессий Claude Code: SDD, события, дерево доков, control center, авто-пополнение
+
+Дата: 2026-09-19. Ветка: main. CWD на момент планирования: `/mnt/82A23910A2390A65/Videos`.
+
+## Контекст
+
+Инспекция окружения (см. «Факты» ниже) показала: четыре из пяти желаемых
+возможностей **уже физически присутствуют** в установленных инструментах, но
+ни одна не инициализирована. Докупать надо только исполняемый BDD-слой и
+бессерверный SQL. Остальное — включить, связать и заставить включаться само.
+
+Требование пользователя: решение **глобальное, для всех сессий Claude Code в
+любой папке**, а не настройка одного проекта. Пилот для Executable SDD —
+ViralMint.
+
+## Цель
+
+Одно владеемое дерево `~/.agent-ops/`, которое:
+
+1. даёт исполняемые спеки (требование → BDD-сценарий → SQL-ассерт → галочка в
+   `openspec` только по exit-code теста);
+2. пишет все действия агента в событийный лог и отвечает на вопросы о них
+   SQL-проекциями (верификация и эксперименты без перепрогона);
+3. отдаёт документацию порциями (скелет → раскрытие по ссылке), а не
+   вываливает 19.5 КБ CLAUDE.md в каждую сессию;
+4. видит соседние проекты как один workspace и умеет переносить из них идеи с
+   записью происхождения;
+5. само пополняется: решения, поправки и промахи оседают в дерево доков через
+   ревью-очередь, а не теряются в чате;
+
+и **разворачивается сам при первом запуске Claude Code в любой папке**.
+
+## Критерии приёмки плана в целом
+
+- В чистой папке `git init` + запуск Claude Code → через ≤2 с в контексте
+  отчёт бутстрапа, на диске `.agent/` и скелет `docs/`, без вопросов к человеку.
+- `agent-q "select ..."` отвечает на вопрос «что агент делал в проекте X за
+  сутки» одним SQL по событиям.
+- В ViralMint `pytest` падает, если требование openspec не имеет сценария.
+- `repowise workspace list` показывает курируемый список активных проектов.
+- `repowise decision candidates` непуст после дня работы, и очередь ревью
+  разбирается ритуалом, а не вручную по памяти.
+
+---
+
+## Пояснения: что такое repowise workspace и control center
+
+Спрошено прямо, поэтому здесь, а не в приложении.
+
+### repowise workspace
+
+`repowise` индексирует репозиторий в вики (`.repowise/wiki.db`) и отвечает по
+нему на вопросы с цитатами: обзор архитектуры, карточка файла/символа, риск
+изменения, мёртвый код, ADR-решения. Сейчас у вас так проиндексирован
+`Videos` — **по одному репозиторию, каждый сам в себе**.
+
+**Workspace — это режим «много репозиториев как одно целое».** Создаётся файл
+`.repowise-workspace.yaml` на общем корне, в него добавляются репозитории
+(`repowise workspace add`). Что появляется только в этом режиме:
+
+- `workspace impacted-tests` — меняешь файл в репо A, получаешь список тестов
+  **в репо B и C**, которые это ломает (кросс-репозиторный blast radius);
+- `workspace check` — архитектурный линт: запрещённые связи между
+  репозиториями, циклы;
+- `workspace metrics` — propagation cost, ядро системы;
+- общий поиск: вопрос задаётся сразу по вики всех репозиториев — это и есть
+  механизм «ходить по соседним проектам и заимствовать знания».
+
+Сейчас `repowise workspace list` падает с `No .repowise-workspace.yaml found` —
+режим ни разу не включался.
+
+**Важное ограничение, найденное при инспекции:** под `/mnt/.../Trade` лежит
+**224 git-репозитория** (учебные курсы, форки, песочницы 2019-2024 гг.).
+`workspace scan` на этом корне попытается проиндексировать всё — это часы
+работы и деньги на LLM-генерацию вики. Поэтому решение: корень = `Trade`, но
+наполнение **только курируемым списком** (узел E1), `scan` не применять.
+
+### Control center
+
+Это не одна программа, а слой «вижу и веду все проекты и все запущенные
+агенты из одного места». У вас уже стоят три его части, не связанные между собой:
+
+| Часть | Что даёт | Состояние |
+|---|---|---|
+| `herdr` | терминальный воркспейс: сессии, табы, панели, git-worktree, агенты через socket API | установлен, хук `herdr-agent-state.sh` уже пишет состояние сессии |
+| `ouroboros` дашборд (`ac_dashboard`, `ac_tree_hud`) | вид на прогоны, критерии приёмки, дерево шагов | установлен, есть event store |
+| `repowise workspace` | вид на код и знания всех проектов | не инициализирован |
+| `~/.claude.json` | реестр 13 проектов, где вы работали | заполняется само |
+
+Что добавляется этим планом как связка: единый реестр активных проектов
+(`~/.agent-ops/registry.tsv`), единая SQL-плоскость над событиями всех проектов
+(`control.duckdb`), и раскладка herdr, где панель на проект + панель с
+проекциями. То есть control center = herdr как оболочка + duckdb как «что
+происходит» + repowise workspace как «что где лежит».
+
+---
+
+## Решения
+
+**Владеемый корень `~/.agent-ops/`, а не `~/.claude/`.** `~/.claude/` управляется
+самим Claude Code (он пишет туда `settings.json`, `projects/`, `history.jsonl`,
+обновляет структуру между релизами). По правилу «никогда не создавать конфликт
+с апстримом» свои скрипты, SQL, шаблоны и документы кладём в каталог, которого
+у апстрима нет. Внутри `~/.claude/` остаются только объявленные точки
+подключения: несколько строк в `hooks` и один symlink-скилл.
+
+**Единая SQL-плоскость — DuckDB, одна на все проекты.** Спрошено «если можно
+общее решение — делай общее». DuckDB это позволяет, Postgres нет: DuckDB —
+один бинарник без сервера, умеет `ATTACH` чужих SQLite-файлов и читать
+csv/parquet. Значит одна глобальная БД `~/.agent-ops/control.duckdb`
+подключает к себе event-лог каждого проекта и `~/.ouroboros/ouroboros.db`
+только для чтения — кросс-проектный запрос становится обычным `JOIN`.
+Per-project остаётся только сырой `.agent/events.db` (SQLite, пишется хуком).
+
+**Postgres MCP снимается.** Проверено: `DATABASE_URI` нет ни в `Videos`, ни в
+`ViralMint`; локальный PG не слушает (`/var/run/postgresql:5432 - no response`);
+в списке инструментов сессии `mcp__postgres__*` отсутствует. Сервер стартует
+при каждом запуске и не даёт ничего. Если позже появится проект с настоящей
+БД — вернуть точечно в его `.mcp.json`, а не глобально.
+
+**Отвергнуто.**
+
+- *Postgres как основа event store.* Требует сервера, бэкапов и `DATABASE_URI`
+  в каждом проекте; для append-only лога и проекций это цена без выгоды.
+- *`repowise workspace scan` на корне Trade.* 224 репозитория, часы генерации,
+  деньги. Только курируемый `add`.
+- *Хранить документы в `~/.claude/docs/`.* Апстрим-каталог, см. выше.
+- *Behave / cucumber-js как BDD-раннер.* ViralMint уже на pytest
+  (`[tool.pytest.ini_options]`, `testpaths=["tests"]`), второй раннер = второй
+  CI-путь. Берём `pytest-bdd` — те же фикстуры, тот же прогон.
+- *Скилл с автоактивацией как механизм бутстрапа.* Срабатывание решает модель,
+  гарантии нет. Годится только вторым эшелоном (ручной вызов).
+- *Правка `.claude/settings.json` проекта для бутстрапа.* Требует, чтобы файл
+  уже существовал — не решает задачу «первый запуск».
+
+---
+
+## Способы авто-запуска при первом входе в папку
+
+Задача: при первом запуске Claude Code в папке нужные действия выполняются сами.
+Разобраны все механизмы, которые окружение реально поддерживает.
+
+| Способ | Когда срабатывает | Плюсы | Минусы | Роль в плане |
+|---|---|---|---|---|
+| **Глобальный `SessionStart` хук** | каждый старт/resume/clear в любой папке | уже стоит (`session-start.sh` на `startup\|resume\|clear`), ничего не надо помнить, работает в любой папке | есть таймаут; вывод попадает в контекст (надо ≤8 строк); нельзя задавать вопросы | **основной** (G2) |
+| Cron / `ScheduleWakeup` / `~/.claude/daemon` | по расписанию | уносит дорогое (индексация вики, LLM-извлечение решений) из старта сессии | не мгновенно | **дополняющий** (G3) — тяжёлые шаги |
+| `git config init.templateDir` | `git init` нового репо | `.agent/` и post-commit хук появляются до первого запуска агента | только новые репо | **дополняющий** (G4) |
+| Project `.claude/settings.json` с `SessionStart` | старт в этом проекте | точная настройка под проект | файл должен уже быть → не «первый запуск» | пишется бутстрапом, не наоборот |
+| Скилл `/ops-bootstrap` | по вызову | полный режим с дорогими шагами и подтверждением | вручную | ручной режим (G1) |
+| `direnv` / `.envrc` | `cd` в папку в шелле | работает и вне Claude Code | ещё одна зависимость, вне агента | не берём |
+| `herdr integration` | создание таба/воркспейса | привязка к control center | только внутри herdr | опционально (E3) |
+
+**Выбранная схема — три режима, различаются ценой, выбираются в `~/.agent-ops/config.sh`:**
+
+- `detect` (по умолчанию, ≤1.5 с): ничего не пишет, печатает в контекст 5-8
+  строк — что за проект, что уже настроено, чего нет, какой командой добрать.
+- `safe-auto`: плюс создаёт бесплатное и идемпотентное — `.agent/` с
+  event-БД, скелет `docs/`, правила в `.git/info/exclude`, project
+  `.claude/settings.json` с эмиттером. Без сети, без LLM, без денег.
+- `full-auto`: плюс дорогое — `repowise init`, `openspec init`, добавление в
+  workspace. Только по явному включению, потому что тратит деньги на LLM.
+
+**Идемпотентность:** stamp-файл `.agent/.bootstrap-v<N>`. Есть и версия
+совпадает → выход за миллисекунды. Версия выросла → досыпаются только новые
+шаги. Это делает хук безопасным на каждом старте, а не «один раз в жизни».
+
+---
+
+## Граф работ
+
+```yaml
+graph:
+  # A. фундамент
+  - {id: A1, needs: [],           parallel: "foundation", status: "[x]", files: [~/.agent-ops/**]}
+  - {id: A2, needs: [],           parallel: "foundation", status: "[x]", files: [~/.local/bin/duckdb]}
+  - {id: A3, needs: [],           parallel: "foundation", status: "[x]", files: [~/.claude.json]}
+  - {id: A4, needs: [],           parallel: "foundation", status: "[!]", files: [~/.claude/settings.json]}
+
+  # B. событийный слой
+  - {id: B1, needs: [A1],         parallel: "events",     status: "[x]", files: [~/.agent-ops/sql/events.ddl.sql]}
+  - {id: B2, needs: [A1, B1],     parallel: "",           status: "[x]", files: [~/.agent-ops/bin/agent-emit, ~/.claude/settings.json]}
+  - {id: B3, needs: [A1, A2, B1], parallel: "events",     status: "[x]", files: [~/.agent-ops/bin/agent-q]}
+  - {id: B4, needs: [B3],         parallel: "",           status: "[x]", files: [~/.agent-ops/sql/projections/**]}
+
+  # C. дерево документов
+  - {id: C1, needs: [A1],         parallel: "docs",       status: "[ ]", files: ["<repo>/.repowise/config.yaml"]}
+  - {id: C2, needs: [A1],         parallel: "docs",       status: "[ ]", files: [~/.claude/CLAUDE.md, ~/.agent-ops/docs/**]}
+  - {id: C3, needs: [A1],         parallel: "docs",       status: "[ ]", files: [~/.agent-ops/bootstrap/templates/docs/**]}
+
+  # D. executable SDD (пилот ViralMint)
+  - {id: D1, needs: [],           parallel: "foundation", status: "[x]", files: [ViralMint/openspec/**]}
+  - {id: D2, needs: [A2],         parallel: "",           status: "[ ]", files: [ViralMint/pyproject.toml, ViralMint/tests/features/**]}
+  - {id: D3, needs: [B3, D2],     parallel: "",           status: "[ ]", files: [ViralMint/tests/steps/**, ViralMint/tests/conftest.py]}
+  - {id: D4, needs: [D1, D3],     parallel: "",           status: "[ ]", files: [~/.agent-ops/bin/agent-ops]}
+  - {id: D5, needs: [D4],         parallel: "",           status: "[ ]", files: [ViralMint/.claude/skills/sdd-verify/**]}
+
+  # E. control center
+  - {id: E1, needs: [A1],         parallel: "",           status: "[!]", files: ["<root>/.repowise-workspace.yaml"]}
+  - {id: E2, needs: [E1],         parallel: "",           status: "[ ]", files: [~/.agent-ops/skills/borrow/**]}
+  - {id: E3, needs: [],           parallel: "",           status: "[!]", files: [~/.config/herdr/config.toml]}
+
+  # F. пополнение дерева
+  - {id: F1, needs: [C1],         parallel: "",           status: "[ ]", files: ["<repo>/.repowise/config.yaml", "<repo>/.git/hooks/post-commit"]}
+  - {id: F2, needs: [A1],         parallel: "harvest",    status: "[ ]", files: [~/.agent-ops/memory/**]}
+  - {id: F3, needs: [A1, B1, F1], parallel: "",           status: "[ ]", files: [~/.agent-ops/bin/agent-harvest, ~/.claude/settings.json]}
+  - {id: F4, needs: [],           parallel: "harvest",    status: "[!]", files: [~/.claude/skills/**]}
+
+  # G. авто-бутстрап
+  - {id: G1, needs: [A1, B1, C3], parallel: "",           status: "[ ]", files: [~/.agent-ops/bootstrap/init-project.sh]}
+  - {id: G2, needs: [G1, B2],     parallel: "wire",       status: "[ ]", files: [~/.claude/hooks/session-start.sh]}
+  - {id: G3, needs: [G1, E1],     parallel: "wire",       status: "[ ]", files: [~/.agent-ops/bin/agent-nightly]}
+  - {id: G4, needs: [G1],         parallel: "wire",       status: "[ ]", files: [~/.agent-ops/git-template/**]}
+  - {id: G5, needs: [G2, G3, G4], parallel: "",           status: "[ ]", files: [~/.agent-ops/tests/**]}
+```
+
+Зона `<repo>/.repowise/config.yaml` общая у **C1 и F1** → строго
+последовательно, F1 после C1, иначе второй перезапишет вердикты первого.
+
+### Состояние исполнения на 2026-09-19
+
+Закрыто восемь узлов: **A1, A2, A3, B1, B2, B3, B4, D1**. Событийный слой
+работает на живых данных этой сессии.
+
+Свободны сейчас (`needs` закрыты):
+
+| Узел | Исполнитель | Запущен? |
+|---|---|---|
+| C1 `repowise-per-repo` | агент | нет — следующий в очереди |
+| C2 `claudemd-split` | агент | нет — трогает `~/.claude/CLAUDE.md`, файл человека; делать диффом и после явного «да» |
+| C3 `docs-template` | агент | нет — следующий, разблокирует G1 |
+| D2 `bdd-runner` | агент | нет — ставит зависимость в ViralMint |
+| F2 `memory-fix` | агент | нет — ждёт ответа на вопрос 3 (чинить память или убрать как мёртвую) |
+| A4 `effort` | человек `[!]` | бюджетное решение |
+| E1 `workspace-init` | человек `[!]` | нужен состав списка и «да» на смету |
+| E3 `herdr-layout` | человек `[!]` | интерактивный TUI |
+| F4 `skills-revive` | человек `[!]` | бюджет стартового контекста |
+
+Незапущенных без причины нет.
+
+---
+
+## Узлы
+
+### A1 `ops-root` — владеемый корень
+- исполнитель: **агент**
+- выход: `~/.agent-ops/` с `bin/ sql/ bootstrap/ docs/ memory/ tests/`, `config.sh`, `registry.tsv`, под собственным git.
+- приёмка: `~/.agent-ops/bin/agent-ops doctor` печатает отчёт и выходит с 0; `git -C ~/.agent-ops log` содержит начальный коммит.
+- действия:
+  ```bash
+  mkdir -p ~/.agent-ops/{bin,sql/projections,bootstrap/templates,docs,memory,tests,git-template/hooks}
+  git -C ~/.agent-ops init -q
+  # config.sh: BOOTSTRAP_MODE=detect|safe-auto|full-auto, OPS_ROOT, WORKSPACE_ROOT
+  # registry.tsv: путь<TAB>имя<TAB>режим<TAB>активен  — курируемый список, НЕ авто-scan
+  printf '%s\n' 'export PATH="$HOME/.agent-ops/bin:$PATH"' >> ~/.profile
+  ```
+- заметки: реестр заполняется из `~/.claude.json` (13 проектов, где реально работали), а не обходом диска — под Trade 224 репозитория. **Сделано 2026-09-19**, коммит `b40639e`. `doctor` даёт «ок 22, проблем 0». Реестр: 5 активных (viralmint `full-auto`, videos/video_wizard/agentkit/project2task `safe-auto`), 6 неактивных; deepseek-harness исключён — не git-репозиторий. Отклонение: запись в `$HOME` из bash блокируется песочницей сессии («Read-only file system») — все шаги шли с `dangerouslyDisableSandbox`, это ожидаемо и настраивается через `/sandbox`.
+
+### A2 `duckdb` — бессерверный SQL
+- исполнитель: **агент** (сеть: github.com в allowlist песочницы)
+- выход: `duckdb` в `~/.local/bin`, python-модуль `duckdb`.
+- приёмка: `duckdb -c "select 42"` → 42; `python3 -c "import duckdb"` без ошибки.
+- действия:
+  ```bash
+  curl -L -o "$TMPDIR/duckdb.zip" \
+    https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-amd64.zip
+  unzip -o "$TMPDIR/duckdb.zip" -d ~/.local/bin/ && chmod +x ~/.local/bin/duckdb
+  pip install --user duckdb
+  ```
+- заметки: если релизный URL сменил имя артефакта — взять точное имя со страницы релизов. Устанавливаем **один раз глобально**, per-project ничего не нужно. **Сделано 2026-09-19.** CLI по плановому URL (21 МБ), `select 42` отвечает. Отклонение: `pip install --user duckdb` отбит PEP 668 («externally managed environment») — поставлено с `--break-system-packages --user`, модуль лёг в `~/.local/lib`, системные пакеты не тронуты; версия 1.5.5. Проверено отдельно: `ATTACH ... (TYPE SQLITE)` работает **офлайн** — расширение sqlite вшито в бинарник, докачка из сети не нужна.
+
+### A3 `mcp-diet` — снять мёртвый postgres MCP
+- исполнитель: **агент**, приёмка человеком (нужен рестарт сессии)
+- выход: `mcpServers.postgres` удалён из `~/.claude.json`.
+- приёмка: после рестарта в списке инструментов нет `mcp__postgres__*`, время старта сессии не выросло.
+- действия: правка `~/.claude.json` (Edit), удалить ключ `postgres`. Скрипты `postgres-mcp-from-env` оставить на диске — они написаны правильно и пригодятся, когда появится проект с БД.
+- заметки: обоснование в «Решения». Заодно проверить, нужны ли одновременно три браузерных MCP (`playwright`, `agent-browser`, `browser-mcp`) — они дублируются и стоят контекста на старте; это отдельное решение человека. **Сделано 2026-09-19** через `claude mcp remove postgres -s user` (штатный путь вместо ручной правки JSON). Резерв: `~/.agent-ops-backups/claude.json.bak-A3`, режим 600, **вне git** — содержит auth-токен. Инструкция по точечному возврату: `~/.agent-ops/docs/mcp-postgres-removed.md`. Остаётся 9 глобальных MCP. **Приёмка за человеком: нужен рестарт сессии.**
+- новая находка: глобальный `repowise` MCP в `~/.claude/settings.json` жёстко привязан к пути ViralMint (`args: ["mcp", ".../ViralMint", ...]`). В любой другой папке он отвечает по **чужой** вики, молча и правдоподобно. Это хуже, чем отсутствие сервера. Лечится либо переводом на per-project `.mcp.json`, либо обёрткой, подставляющей git-корень; отдельный узел не заводился — решить при C1.
+
+### A4 `effort` — поднять уровень усилий
+- исполнитель: **человек** `[!]`
+- выход: `effortLevel` в `~/.claude/settings.json` поднят с `low`.
+- приёмка: человек подтвердил выбор.
+- заметки: **ждёт человека** — влияет на расход токенов и деньги, агент такое решение за пользователя не принимает. Текущее `low` при модели `opus[1m]` противоречит замаху этого плана: спеки, проекции и архитектурные решения на низком усилии выходят поверхностными. Команда: в `~/.claude/settings.json` заменить `"effortLevel": "low"` на `"medium"` или `"high"`.
+
+### B1 `event-ddl` — схема событий
+- исполнитель: **агент**
+- выход: `~/.agent-ops/sql/events.ddl.sql`.
+- приёмка: `sqlite3 /tmp/t.db < events.ddl.sql` создаёт таблицу; повторный прогон не падает (`IF NOT EXISTS`).
+- действия: схема повторяет форму ouroboros (проверенную на 9.7 МБ данных), чтобы проекции были общими:
+  ```sql
+  CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY, aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL,
+    event_type TEXT NOT NULL, payload TEXT NOT NULL,
+    timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, project TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS ix_events_ts ON events(timestamp);
+  CREATE INDEX IF NOT EXISTS ix_events_type ON events(event_type);
+  CREATE INDEX IF NOT EXISTS ix_events_agg ON events(aggregate_type, aggregate_id, timestamp);
+  ```
+- заметки: append-only, никаких UPDATE. Это условие того, что эксперимент = новая проекция над теми же данными, без перепрогона работы. **Сделано 2026-09-19**, коммит `db32c1d`. Добавлен `PRAGMA journal_mode = WAL`: эмиттер пишет из хука одновременно с чтением проекций, блокировка не должна ронять сессию. Идемпотентность проверена двойным прогоном.
+
+### B2 `event-emit` — эмиттер событий из хуков
+- исполнитель: **агент**
+- выход: `~/.agent-ops/bin/agent-emit` + записи в `hooks` глобального `settings.json`.
+- приёмка: после одной правки файла `select count(*) from events where event_type='tool.used'` > 0; эмиттер укладывается в 150 мс и **никогда не возвращает ненулевой код** (сломанный эмиттер не должен ломать работу агента).
+- действия: хук читает JSON хука со stdin, пишет строку в `.agent/events.db` проекта. Вешается на уже существующие точки: `PostToolUse` (`tool.used`), `Stop` (`session.stopped`), `SessionStart` (`session.started`), `PostToolUseFailure` (`tool.failed`).
+- заметки: `PostToolUse` уже несёт два хука (git-ai checkpoint и repowise-augment) — добавляем третий, порядок не важен. Событие пишет `project` из git-корня, чтобы кросс-проектные проекции работали. **Сделано 2026-09-19.** Замер: **20 мс** на вызов при бюджете 150. Хуки подхватились **без рестарта** — приёмка выполнена на живых событиях этой же сессии (правки `settings.json`, запуски bash, Write в `agent-q`). Резерв настроек: `~/.agent-ops-backups/settings.json.bak-B2`.
+- решения по реализации: (1) корень проекта ищется подъёмом по дереву до `.git` **без вызова git** — в PATH стоит обёртка `git-ai`, её запуск на каждый хук дороже всего остального; (2) payload не хранит сырой вход хука — `tool_response` бывает мегабайтным и лог распухнет за день; хранятся session/tool/cwd/file/cmd(200)/error(300); (3) `.agent/` исключён через `.git/info/exclude`, не через корневой `.gitignore` — правило о конфликте с апстримом.
+- пойманная ошибка: первая версия payload использовала `select(. != "")` внутри конструктора объекта. В jq это обнуляет **весь** объект, когда условие ложно, — payload выходил `{}`. Заменено на `blank_to_null`. Проверено и экранирование: путь `O'Brien.txt` не ломает SQL.
+
+### B3 `agent-q` — единая SQL-точка входа
+- исполнитель: **агент**
+- выход: `~/.agent-ops/bin/agent-q` и `control.duckdb`.
+- приёмка: `agent-q "select project, count(*) from all_events group by 1"` даёт строки по нескольким проектам.
+- действия: обёртка над duckdb, которая при старте делает `ATTACH` всех источников и создаёт `VIEW all_events` объединением:
+  ```
+  ATTACH '~/.ouroboros/ouroboros.db' AS ouro (TYPE SQLITE, READ_ONLY);
+  ATTACH '<proj>/.agent/events.db'  AS p_<n> (TYPE SQLITE, READ_ONLY);  -- по registry.tsv
+  ```
+- заметки: это и есть «общее решение для всех проектов» из вашего ответа: сырые данные лежат локально в каждом проекте, а видятся как одна таблица. `READ_ONLY` на ouroboros обязателен — чужая БД, свой писатель. **Сделано 2026-09-19.** Приёмка: запрос по `all_events` даёт строки по трём источникам (ouroboros 1854, videos, viralmint).
+- **изменение решения: `control.duckdb` не создаётся.** Планировалась постоянная БД, но она даёт только проблемы: список проектов меняется, и файл пришлось бы пересобирать при каждом добавлении. `agent-q` вместо этого **без состояния** — преамбула `ATTACH` собирается заново на каждый вызов из `registry.tsv`. Пропавший проект просто исчезает из выборки, новый появляется сам. `CONTROL_DB` в `config.sh` оставлен на случай, если понадобятся материализованные проекции; `doctor` проверяет живость `agent-q`, а не наличие файла.
+- добавлено сверх плана: колонка `ts` в `all_events`. У ouroboros время `YYYY-MM-DD HH:MM:SS.ffffff`, у наших событий ISO с `T` и `Z` — как строки они несравнимы, сортировка молча врала бы. Проекции сортируют по `ts`, а не по `timestamp`. Ещё: `--sources`, `--list`, форматы `--csv/--json/--line`, и пустая типизированная вьюха, когда источников нет вовсе, — запрос в чистой системе даёт 0 строк, а не падение.
+
+### B4 `projections` — проекции
+- исполнитель: **агент**
+- выход: `~/.agent-ops/sql/projections/*.sql`, вызываются `agent-q -p <имя>`.
+- приёмка: каждая проекция выполняется на реальных данных и не падает на пустом наборе.
+- действия: стартовый набор — `session-timeline`, `files-touched`, `tool-failures`, `gate-failures` (провалы SDD-гейта), `spend-by-project`.
+- заметки: проекции версионируются, БД — нет. Новая проекция = новый вопрос к уже собранной истории, это и есть дешёвый эксперимент. **Сделано 2026-09-19.** Пять штук: `session-timeline`, `files-touched`, `tool-failures`, `gate-failures`, `activity-by-project` (переименована из планового `spend-by-project` — расхода токенов в событиях хука нет, считать нечего; считается объём активности). Все пять прогнаны на реальных данных, пустые (`tool-failures`, `gate-failures`) возвращают пустую таблицу с заголовками и кодом 0. Описание проекции читается из второй строки файла — `agent-q --list` печатает каталог без отдельного индекса.
+
+### C1 `repowise-per-repo` — progressive disclosure по репозиториям
+- исполнитель: **агент**
+- выход: в каждом активном репо из registry включены skeleton-Reads, свёрнутые повторные чтения, дайджест-поиск и distill-перезапись команд.
+- приёмка: `repowise hook read-skeleton status` показывает ✓ вместо ✗ (проверено: сейчас все три `off`).
+- действия, в каждом репо:
+  ```bash
+  repowise hook read-skeleton install
+  repowise hook read-reread install
+  repowise hook search-digest install
+  repowise hook rewrite install          # distill-перезапись шумных команд
+  repowise saved                         # сколько это сэкономило
+  ```
+- заметки: подкоманды — `install/uninstall/status`, не `on/off`. Отдельный хук ставить не нужно: механизм несёт уже присутствующий в `settings.json` PostToolUse-хук `repowise-augment`; эти команды лишь переключают per-repo вердикт в `.repowise/config.yaml`. Требует, чтобы репо был проиндексирован (`Videos` — да, остальные — узел E1).
+
+### C2 `claudemd-split` — разрезать глобальный CLAUDE.md
+- исполнитель: **агент**, приёмка человеком
+- выход: `~/.claude/CLAUDE.md` ≤60 строк (роутер), тело — листьями в `~/.agent-ops/docs/`.
+- приёмка: человек подтвердил, что ни одно правило не потерялось; поведение агента в трёх типовых задачах не изменилось.
+- действия: текущие 19.5 КБ грузятся в **каждую** сессию целиком — это анти-progressive по определению. Разделы «Auto-compact protocol», «Compact Instructions», «Формат плана — граф узлов», «Никогда не создавать конфликт с апстримом» уезжают в листья; в CLAUDE.md остаётся строка-указатель на каждый и только то, что нужно всегда.
+- заметки: `Compact Instructions` инжектится авто-компактом через `CLAUDE_COMPACT_RETENTION` — при переносе проверить, что `config.sh` читает новый путь. Трогаем файл человека → диффом, не перезаписью.
+
+### C3 `docs-template` — шаблон дерева документов
+- исполнитель: **агент**
+- выход: `~/.agent-ops/bootstrap/templates/docs/` — три уровня: `docs/README.md` (карта, ≤50 строк) → `docs/<область>/index.md` → листья ≤200 строк.
+- приёмка: шаблон разворачивается бутстрапом в чистой папке и проходит `docs.maxLoc`.
+- заметки: правило листа — один вопрос, один ответ, ссылки вместо копий. Для подпапок с локальными конвенциями использовать существующий скилл `ak:folder-context`, а не плодить свой.
+
+### D1 `openspec-init` — спеки в пилоте
+- исполнитель: **агент**
+- выход: `openspec/` в ViralMint.
+- приёмка: `openspec list --specs` не падает; `ak change list` видит каталог.
+- действия:
+  ```bash
+  cd /mnt/82A23910A2390A65/Trade/EducationAndHack/SMM/ViralMint
+  openspec init --tools claude
+  ```
+- заметки: `--tools claude` даёт неинтерактивный прогон — это же позволит вызывать инициализацию из `full-auto` бутстрапа. `ak change` уже умеет трактовать `openspec/changes/<name>/tasks.md` как исполняемый контракт, свой формат не изобретаем. **Сделано 2026-09-19**, openspec 1.11.0. Создано `openspec/{specs,changes/archive,config.yaml}` (схема `spec-driven`) плюс **6 скиллов и 6 команд в `ViralMint/.claude/`** — этого план не предполагал, проверить при C2, не дублируют ли они `ak`. `openspec list --specs` → «No specs found», код 0: каталог пуст, что и ожидается до первого требования.
+
+### D2 `bdd-runner` — исполняемые сценарии
+- исполнитель: **агент**
+- выход: `pytest-bdd` в зависимостях ViralMint, каталог `tests/features/`, один зелёный сценарий-образец.
+- приёмка: `pytest tests/features -q` зелёный; `pytest` целиком не покраснел от новой зависимости.
+- действия:
+  ```bash
+  cd .../ViralMint && pip install --user pytest-bdd
+  # pyproject.toml: pytest-bdd в dev-зависимости; testpaths уже = ["tests"]
+  mkdir -p tests/features tests/steps
+  ```
+- заметки: pytest уже настроен (`[tool.pytest.ini_options]`, `asyncio_mode=auto`) — встраиваемся, второй раннер не вводим.
+
+### D3 `sql-steps` — SQL внутри сценария
+- исполнитель: **агент**
+- выход: шаговая библиотека `tests/steps/sql.py`: `Given`-фикстура duckdb, `Then` с SQL-ассертом.
+- приёмка: сценарий, утверждающий факт **о событиях** (`.agent/events.db` через `agent-q`), проходит и падает при подмене данных.
+- действия: шаги вида `Then запрос "<sql>" возвращает <n> строк` / `... значение <v>`; подключение к duckdb с теми же `ATTACH`, что в B3.
+- заметки: именно это закрывает «возможность гонять SQL-запросы» из требования — SQL живёт в приёмке спеки, а не в чате. Проекции из B4 переиспользуются как готовые `Given`.
+
+### D4 `spec-gate` — галочка только по exit-code
+- исполнитель: **агент**
+- выход: `agent-ops spec-coverage` и `agent-ops spec-check`.
+- приёмка: требование без сценария → команда падает с внятным перечнем; `ak change check` вызывается только из зелёного прогона.
+- действия: связка по идентификатору — требование в `openspec/specs/<cap>/spec.md` получает `REQ-<id>`, сценарий — тег `@REQ-<id>`; `spec-coverage` сводит два множества и падает на разнице. `spec-check <change> <task>` прогоняет `pytest -m "REQ-..."` и только при 0 зовёт `ak change check`.
+- заметки: сегодня галочка в `tasks.md` — это **заявление агента**. Узел превращает её в следствие теста; без него «executable SDD» остаётся обычным SDD.
+
+### D5 `sdd-skill` — маршрутизация к гейту
+- исполнитель: **агент**
+- выход: `ViralMint/.claude/skills/sdd-verify/SKILL.md`.
+- приёмка: скилл виден в листинге сессии, открытой в ViralMint, и вызывает `agent-ops spec-check`.
+- заметки: писать **инструментом Write**, не шеллом: bash-песочница сессии маскирует `.claude/*` текущего проекта как `/dev/null` (найдено при инспекции — это защита конфига от записи из шелла, а не поломка ФС).
+
+### E1 `workspace-init` — workspace над соседями
+- исполнитель: **человек решает состав и смету, агент выполняет** `[!]`
+- выход: `.repowise-workspace.yaml` на корне `/mnt/82A23910A2390A65/Trade` + курируемый список репозиториев.
+- приёмка: `repowise workspace list` показывает согласованный список со статусом «проиндексирован»; `repowise workspace impacted-tests` отвечает.
+- действия:
+  ```bash
+  repowise init /mnt/82A23910A2390A65/Trade --dry-run   # сначала смета!
+  repowise workspace add <repo>                          # по одному, из registry.tsv
+  repowise workspace list
+  ```
+- заметки: **ждёт человека** по двум причинам. (1) `workspace scan` под Trade затянет **224 репозитория** — нужен ваш список активных (кандидаты: ViralMint, Project2Task, agentkit, MediaSales, video-wizard, deepseek-harness, claude-code-router, desktop-fly). (2) `repowise init` тратит деньги на LLM-генерацию вики — сначала `--dry-run` со сметой, потом ваше «да». `Videos` уже проиндексирован, повторно не трогаем. Корень Trade оставляет `Videos` вне workspace (он лежит рядом с Trade, не внутри) — если нужен и он, корнем берётся `/mnt/82A23910A2390A65`, но тогда в скан попадает весь диск, поэтому только явный `add`.
+
+### E2 `borrow-skill` — заимствование идей с происхождением
+- исполнитель: **агент**
+- выход: скилл «занять идею»: поиск по вики всех репозиториев workspace → выжимка → запись в ADR целевого проекта откуда взято (репо, файл, коммит).
+- приёмка: перенос одного реального решения между двумя проектами оставил ADR со ссылкой на источник.
+- заметки: без записи происхождения заимствование через полгода неотличимо от собственного решения — и его нельзя перепроверить, когда источник изменился.
+
+### E3 `herdr-layout` — оболочка control center
+- исполнитель: **человек** `[!]`
+- выход: раскладка herdr: панель на активный проект, панель с `agent-q -p session-timeline`, панель с дашбордом ouroboros.
+- приёмка: `herdr` поднимает раскладку одной командой.
+- заметки: **ждёт человека** — TUI настраивается интерактивно, агент вслепую раскладку не подберёт. Полезные подкоманды: `herdr workspace`, `herdr tab`, `herdr pane`, `herdr agent`, `herdr integration`. Хук `herdr-agent-state.sh` уже пишет состояние сессии — раскладке есть что показывать.
+
+### F1 `decision-sync` — захват решений заработал
+- исполнитель: **агент**
+- выход: preset `balanced`/`full` + post-commit хук в активных репо.
+- приёмка: после дня работы `repowise decision candidates` непуст (сейчас — 0 активных, 0 предложенных).
+- действия:
+  ```bash
+  repowise decision config show              # сейчас: capture on, preset default
+  repowise decision config preset balanced   # включает session_discovery и conventions
+  repowise hook install                      # post-commit auto-sync — вот чего не хватало
+  repowise decision export                   # решения в .repowise/decisions.yaml, под git
+  ```
+- заметки: неожиданная находка инспекции — захват решений **уже включён** (`capture on`, `LLM extraction on`), но кандидатов ноль, потому что синхронизация ни разу не запускалась: post-commit хук не установлен. То есть узел — не «включить фичу», а «дать ей повод сработать». Зона `.repowise/config.yaml` общая с C1 → **строго после C1**.
+
+### F2 `memory-fix` — починить сломанную память
+- исполнитель: **агент**
+- выход: рабочий каталог памяти + `MEMORY.md` как индекс.
+- приёмка: запись памяти читается в следующей сессии.
+- заметки: сейчас инструкция памяти указывает на `/home/node/.claude/projects/-home-node-workspace/memory/` — **каталога не существует** (`/home/node/.claude`: No such file or directory), `MEMORY.md` нигде нет. Значит каждая запись в память уходит в никуда. Либо перенаправить на `~/.agent-ops/memory/` (и оттуда ссылаться в дерево доков), либо убрать инструкцию как мёртвую — второе честнее, если память не используется. Решение по факту: если в `~/.claude/agent-memory/` за неделю ничего не появилось (сейчас там один пустой каталог) — убрать.
+
+### F3 `harvest-ritual` — ритуал пополнения дерева
+- исполнитель: **агент**
+- выход: `~/.agent-ops/bin/agent-harvest` на `Stop`-хуке: собирает кандидатов решений, `repowise corrections` и провалы гейтов в очередь ревью.
+- приёмка: в конце сессии печатается ≤5 строк «что предлагается записать в дерево»; подтверждённое уезжает в `docs/`, отклонённое — в тумбстоуны.
+- действия: `Stop` уже занят `stop-detect-compact.sh` — добавляем второй хук, не переписываем первый. Источники: `repowise decision candidates`, `repowise corrections`, проекция `gate-failures` из B4.
+- заметки: это и есть «полуавтоматическое» — машина предлагает, человек подтверждает одним словом. Полностью автоматическая запись в дерево доков быстро наполняет его мусором; полностью ручная не наполняет вовсе.
+
+### F4 `skills-revive` — вернуть нужные скиллы
+- исполнитель: **человек** `[!]`
+- выход: 3-5 скиллов возвращены из `~/.claude/skills-disabled/` в `~/.claude/skills/`.
+- приёмка: скиллы видны в листинге, стартовый бюджет контекста не пробит.
+- заметки: **ждёт человека** — 102 скилла лежат отключёнными, и включение расходует стартовый контекст, это ваш бюджетный выбор. Прямо относятся к плану: `bmad-create-prd` (продуктовые требования для пункта 1), `bmad-eval-runner` (прогон оценок), `bmad-document-project` (первичное наполнение дерева). Возврат: `mv ~/.claude/skills-disabled/<name> ~/.claude/skills/`. Учтите, что ak-плагин уже даёт 112 скиллов и часть функций дублируется — возможно, достаточно `ouroboros:pm` вместо `bmad-create-prd`.
+
+### G1 `bootstrap-script` — идемпотентный инициализатор
+- исполнитель: **агент**
+- выход: `~/.agent-ops/bootstrap/init-project.sh` с режимами `detect|safe-auto|full-auto`.
+- приёмка: два прогона подряд в одной папке — второй ничего не меняет и укладывается в 200 мс; `detect` в чистой папке печатает ≤8 строк и не пишет на диск.
+- действия: определить тип проекта (git? python? node?), сверить наличие `.agent/`, `docs/`, `openspec/`, `.repowise/`, вердиктов repowise-хуков; в `safe-auto` создать бесплатное (`.agent/events.db` по B1, скелет docs по C3, `.git/info/exclude` для `.agent/`, project `.claude/settings.json` с эмиттером); в `full-auto` добавить дорогое (`openspec init --tools claude`, `repowise init`, `workspace add`).
+- заметки: stamp `.agent/.bootstrap-v<N>`; версия выросла → досыпаются только новые шаги. Локальные ignore-правила — в `.git/info/exclude`, **не** в корневой `.gitignore` проекта: тот принадлежит апстриму и даст конфликт при слиянии релиза.
+
+### G2 `sessionstart-wire` — автозапуск при входе в папку
+- исполнитель: **агент**
+- выход: вызов бутстрапа из `~/.claude/hooks/session-start.sh`.
+- приёмка: запуск Claude Code в незнакомой папке даёт отчёт бутстрапа в контексте; старт не замедлился заметно; ошибка бутстрапа не ломает сессию.
+- действия: дописать в существующий хук (он уже висит на `startup|resume|clear` и пинит tmux-панель) вызов `init-project.sh` с таймаутом и `|| true`. Тяжёлое — в фон, с записью результата в событие.
+- заметки: вывод хука попадает в контекст каждой сессии — держать ≤8 строк, иначе экономия от progressive disclosure (C1, C2) съедается этим отчётом.
+
+### G3 `nightly-catchup` — догоняющий режим
+- исполнитель: **агент**
+- выход: `~/.agent-ops/bin/agent-nightly` + расписание.
+- приёмка: за один ночной прогон непроиндексированный проект из registry получает вики и попадает в workspace.
+- действия: обход `registry.tsv`, для отстающих — `repowise init`/`sync`, `decision` harvest, пересборка `control.duckdb`. Расписание: `CronCreate` либо systemd-timer.
+- заметки: сюда уносится всё дорогое, чтобы старт сессии оставался мгновенным. Ночной прогон тратит деньги на LLM — включать после согласования сметы в E1.
+
+### G4 `git-template` — бутстрап до первого запуска агента
+- исполнитель: **агент**
+- выход: `~/.agent-ops/git-template/` + `git config --global init.templateDir`.
+- приёмка: `git init` в новой папке сразу даёт `.agent/` и post-commit хук.
+- действия:
+  ```bash
+  git config --global init.templateDir ~/.agent-ops/git-template
+  ```
+- заметки: покрывает только новые репозитории; существующие добираются G2/G3. Дешёвый и не конфликтующий с апстримом способ — шаблон живёт в своём каталоге.
+
+### G5 `bootstrap-verify` — приёмка всей схемы
+- исполнитель: **агент**, финальная приёмка человеком
+- выход: тест в `~/.agent-ops/tests/`, прогоняющий бутстрап на чистой временной папке и на ViralMint.
+- приёмка: все критерии из «Критерии приёмки плана в целом» выполняются; повторный прогон идемпотентен.
+- заметки: обязательно проверить деградацию — что происходит при отсутствии duckdb, при непроиндексированном репо, при отсутствии сети. Бутстрап, ломающий сессию в самолёте, хуже отсутствующего.
+
+---
+
+## Приложение: факты инспекции, на которых стоит план
+
+Собрано 2026-09-19, команды и вывод — в истории сессии.
+
+**Есть и работает:** 10 глобальных MCP (keenable, context7, serena, repowise,
+headroom, process_triage, playwright, agent-browser, browser-mcp, postgres);
+плагины ouroboros 0.53.0, ak/AgentKit 1.7.1 (112 скиллов); хуки git-ai
+checkpoint, rtk-rewrite, dcg/rch, стек авто-компакта, herdr-agent-state,
+repowise-augment; CLI `openspec`, `herdr`, `repowise`, `pt`, `ak`, `git-ai`,
+`psql`, `sqlite3`; python `pytest`, `psycopg2`, `sqlalchemy`; установщики `uv`,
+`pipx`, `pip`, `npm`, `pnpm`.
+
+**Есть, но ни разу не включено:** ouroboros event store
+(`~/.ouroboros/ouroboros.db`, 9.7 МБ, таблица `events` + проекции + MCP
+`query_events`/`query_projection`); repowise workspace (multi-repo,
+кросс-репозиторный blast radius, архитектурный линт) — `.repowise-workspace.yaml`
+отсутствует; repowise progressive disclosure (`read-skeleton`, `read-reread`,
+`search-digest`, `rewrite`) — все `off`, post-commit не установлен; repowise
+decision capture — включён, но 0 кандидатов, потому что sync не запускался.
+
+**Нет вовсе:** BDD-раннер (`behave`, `pytest-bdd`, `cucumber`, `godog` — ни
+одного); `duckdb`, `dbt`, `sqlfluff`; `docs/`+`plans/` в `Videos`; workspace-файл.
+
+**Сломано:** postgres MCP (нет `DATABASE_URI` ни в `Videos`, ни в `ViralMint`;
+PG не слушает; `mcp__postgres__*` отсутствует в сессии); путь памяти
+(`/home/node/.claude` не существует).
+
+**Поправка к первичному анализу:** `/dev/null`-устройства на
+`Videos/.claude/{skills,hooks,agents,commands,workflows}` и корневых dotfiles —
+маскировка **bash-песочницей текущей сессии** (защита конфига cwd от записи из
+шелла), а не состояние ФС. `.claude/CLAUDE.md` соседнего ViralMint читается из
+bash нормально; `Videos/.claude/settings.json` читается Read-инструментом
+(содержит `{}`). Вывод: project-scope расширения работоспособны, писать в них
+надо Write/Edit.
+
+**Пилот ViralMint:** python (`pyproject.toml`, `launcher.py`, `Makefile`),
+pytest настроен (`testpaths=["tests"]`, `asyncio_mode=auto`), `tests/` есть,
+`.claude/` живой (CLAUDE.md 8.6 КБ, `plans/`, `agent-memory/`), `.mcp.json` с
+repowise, `docs/` из 4 файлов, `.env` без `DATABASE_URI`, `openspec/` нет.
+
+## Нерешённые вопросы
+
+1. **Состав workspace (блокирует E1).** Восемь кандидатов названы в заметках
+   E1 — нужен ваш список и «да» на смету `repowise init --dry-run`.
+2. **Три браузерных MCP одновременно** (`playwright`, `agent-browser`,
+   `browser-mcp`) дублируют друг друга и стоят контекста на каждом старте.
+   Оставить один? Какой?
+3. **Судьба памяти (F2).** Инструмент памяти указывает в несуществующий путь.
+   Починить и пользоваться, или убрать инструкцию как мёртвую?
+4. **Конфликт конвенций путей.** Session-хук требует планы в
+   `Videos/plans`, глобальный CLAUDE.md — в `<project>/.claude/plans/`. План
+   положен по второму правилу. Какое главнее?
