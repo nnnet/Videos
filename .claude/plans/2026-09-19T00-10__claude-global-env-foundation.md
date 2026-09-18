@@ -183,14 +183,14 @@ graph:
   - {id: B4, needs: [B3],         parallel: "",           status: "[x]", files: [~/.agent-ops/sql/projections/**]}
 
   # C. дерево документов
-  - {id: C1, needs: [A1],         parallel: "docs",       status: "[ ]", files: ["<repo>/.repowise/config.yaml"]}
+  - {id: C1, needs: [A1],         parallel: "docs",       status: "[x]", files: ["<repo>/.repowise/config.yaml", ~/.claude/settings.json, ~/.agent-ops/bin/repowise-mcp-here]}
   - {id: C2, needs: [A1],         parallel: "docs",       status: "[ ]", files: [~/.claude/CLAUDE.md, ~/.agent-ops/docs/**]}
-  - {id: C3, needs: [A1],         parallel: "docs",       status: "[ ]", files: [~/.agent-ops/bootstrap/templates/docs/**]}
+  - {id: C3, needs: [A1],         parallel: "docs",       status: "[x]", files: [~/.agent-ops/bootstrap/templates/docs/**, ~/.agent-ops/bin/agent-ops]}
 
   # D. executable SDD (пилот ViralMint)
   - {id: D1, needs: [],           parallel: "foundation", status: "[x]", files: [ViralMint/openspec/**]}
-  - {id: D2, needs: [A2],         parallel: "",           status: "[ ]", files: [ViralMint/pyproject.toml, ViralMint/tests/features/**]}
-  - {id: D3, needs: [B3, D2],     parallel: "",           status: "[ ]", files: [ViralMint/tests/steps/**, ViralMint/tests/conftest.py]}
+  - {id: D2, needs: [A2],         parallel: "",           status: "[x]", files: [ViralMint/host-local/bdd/**]}
+  - {id: D3, needs: [B3, D2],     parallel: "",           status: "[ ]", files: [ViralMint/host-local/bdd/steps/**]}
   - {id: D4, needs: [D1, D3],     parallel: "",           status: "[ ]", files: [~/.agent-ops/bin/agent-ops]}
   - {id: D5, needs: [D4],         parallel: "",           status: "[ ]", files: [ViralMint/.claude/skills/sdd-verify/**]}
 
@@ -218,17 +218,20 @@ graph:
 
 ### Состояние исполнения на 2026-09-19
 
-Закрыто восемь узлов: **A1, A2, A3, B1, B2, B3, B4, D1**. Событийный слой
-работает на живых данных этой сессии.
+Закрыто одиннадцать узлов: **A1, A2, A3, B1, B2, B3, B4, C1, C3, D1, D2**.
+Событийный слой работает на живых данных этой сессии; progressive
+disclosure включён в трёх проиндексированных репозиториях; шаблон дерева
+документов разворачивается и проверяется гейтом; сценарии ViralMint
+исполняются и краснеют на лжи.
 
 Свободны сейчас (`needs` закрыты):
 
 | Узел | Исполнитель | Запущен? |
 |---|---|---|
-| C1 `repowise-per-repo` | агент | нет — следующий в очереди |
-| C2 `claudemd-split` | агент | нет — трогает `~/.claude/CLAUDE.md`, файл человека; делать диффом и после явного «да» |
-| C3 `docs-template` | агент | нет — следующий, разблокирует G1 |
-| D2 `bdd-runner` | агент | нет — ставит зависимость в ViralMint |
+| D3 `sql-steps` | агент | да — следующий в работе |
+| G1 `bootstrap-script` | агент | да — разблокирован закрытием C3 |
+| F1 `decision-capture` | агент | нет — зона `.repowise/config.yaml` освободилась с закрытием C1, беру после G1 |
+| C2 `claudemd-split` | агент | нет — трогает `~/.claude/CLAUDE.md`, файл человека; только диффом и после явного «да» |
 | F2 `memory-fix` | агент | нет — ждёт ответа на вопрос 3 (чинить память или убрать как мёртвую) |
 | A4 `effort` | человек `[!]` | бюджетное решение |
 | E1 `workspace-init` | человек `[!]` | нужен состав списка и «да» на смету |
@@ -236,6 +239,10 @@ graph:
 | F4 `skills-revive` | человек `[!]` | бюджет стартового контекста |
 
 Незапущенных без причины нет.
+
+Ждут рестарта сессии (правка применяется только при старте): приёмка
+**A3** (postgres MCP больше не поднимается) и замена `repowise` MCP на
+обёртку из **C1**.
 
 ---
 
@@ -339,7 +346,7 @@ graph:
   repowise hook rewrite install          # distill-перезапись шумных команд
   repowise saved                         # сколько это сэкономило
   ```
-- заметки: подкоманды — `install/uninstall/status`, не `on/off`. Отдельный хук ставить не нужно: механизм несёт уже присутствующий в `settings.json` PostToolUse-хук `repowise-augment`; эти команды лишь переключают per-repo вердикт в `.repowise/config.yaml`. Требует, чтобы репо был проиндексирован (`Videos` — да, остальные — узел E1).
+- заметки: подкоманды — `install/uninstall/status`, не `on/off`. Отдельный хук ставить не нужно: механизм несёт уже присутствующий в `settings.json` PostToolUse-хук `repowise-augment`; эти команды лишь переключают per-repo вердикт в `.repowise/config.yaml`. Требует, чтобы репо был проиндексирован (`Videos` — да, остальные — узел E1). **Сделано 2026-09-19.** Три вердикта включены в трёх проиндексированных репозиториях: `Videos`, `ViralMint`, `video-wizard` (путь в реестре — `video-wizard`, не `video_wizard`: имя каталога с дефисом, имя проекта с подчёркиванием). `agentkit` и `project2task` пропущены **осознанно** — вики не построена (`.repowise/wiki.db` нет), вердикт без индекса ничего не даёт; включатся узлом E1. Отклонение от плана: `rewrite install` — **не** per-repo, он пишет группу `Bash|PowerShell` в `~/.claude/settings.json` (бэкап `~/.agent-ops-backups/settings.json.bak-C1`) и попутно создаёт `AGENTS.md` в текущем репо (в `Videos` — новый файл на 12 строк, не симлинк, апстрима у него нет). Хук codex не встал и не встанет: Codex 0.117.0 < 0.137, сам инструмент так и сказал. **Побочно закрыта находка про MCP:** вместо привязки к пути ViralMint в `settings.json` теперь `~/.agent-ops/bin/repowise-mcp-here` — обёртка, вычисляющая git-корень на старте (`git rev-parse --show-toplevel` → `CLAUDE_PROJECT_DIR` → `cwd`). Рукопожатие MCP проверено из `video-wizard`. Приёмка самой замены — **после рестарта сессии**, как и A3.
 
 ### C2 `claudemd-split` — разрезать глобальный CLAUDE.md
 - исполнитель: **агент**, приёмка человеком
@@ -352,7 +359,7 @@ graph:
 - исполнитель: **агент**
 - выход: `~/.agent-ops/bootstrap/templates/docs/` — три уровня: `docs/README.md` (карта, ≤50 строк) → `docs/<область>/index.md` → листья ≤200 строк.
 - приёмка: шаблон разворачивается бутстрапом в чистой папке и проходит `docs.maxLoc`.
-- заметки: правило листа — один вопрос, один ответ, ссылки вместо копий. Для подпапок с локальными конвенциями использовать существующий скилл `ak:folder-context`, а не плодить свой.
+- заметки: правило листа — один вопрос, один ответ, ссылки вместо копий. Для подпапок с локальными конвенциями использовать существующий скилл `ak:folder-context`, а не плодить свой. **Сделано 2026-09-19.** Восемь файлов: `README.md` (карта), три области (`architecture/`, `operations/`, `decisions/`) с `index.md` и по листу-образцу, `_leaf-template.md`, `decisions/0000-template.md`. Плейсхолдеры `{{PROJECT}}`/`{{DATE}}` подставляются при развёртывании. Отклонение: гейта `docs.maxLoc` **не существовало** — это было моё сокращение в плане, а не чья-то команда; поэтому лимиты реализованы как `agent-ops docs-check` (README ≤50, `index.md` ≤100, лист ≤200; уровень определяется именем файла, а не глубиной, потому что бутстрап разворачивает шаблон в чужие деревья произвольной глубины). Сверх лимитов гейт ловит **несвязанные листья** — лист, на который не ссылается ни один файл, недостижим и протухает первым. Развёртывание — `agent-ops docs-init <каталог>`, идемпотентно (существующие файлы не трогаются). Приёмка прогнана в чистой папке: 8 файлов создано, гейт зелёный; повторный прогон — 0 создано; подложенный лист на 250 строк — гейт красный, код 1.
 
 ### D1 `openspec-init` — спеки в пилоте
 - исполнитель: **агент**
@@ -375,7 +382,7 @@ graph:
   # pyproject.toml: pytest-bdd в dev-зависимости; testpaths уже = ["tests"]
   mkdir -p tests/features tests/steps
   ```
-- заметки: pytest уже настроен (`[tool.pytest.ini_options]`, `asyncio_mode=auto`) — встраиваемся, второй раннер не вводим.
+- заметки: pytest уже настроен (`[tool.pytest.ini_options]`, `asyncio_mode=auto`) — встраиваемся, второй раннер не вводим. **Сделано 2026-09-19, но не туда, куда планировалось.** Проверка перед правкой показала: у ViralMint есть **апстрим с отключённым push** (`origin = openclaw-easy/ViralMint`, `push = DISABLED://upstream-is-pull-only`), текущая ветка — своя `raider-host`, а `pyproject.toml` и `tests/` авторства апстрима. Плановая правка `pyproject.toml` и подкаталогов `tests/` дала бы конфликт при каждом слиянии релиза — ровно то, что запрещено правилом «никогда не создавать конфликт с апстримом». Поэтому слой сценариев живёт в `host-local/bdd/` (каталога нет ни в одной ветке апстрима, проверено `git ls-tree origin/main`) со **своим** `pytest.ini`; апстримовые файлы не тронуты ни на строку. Запуск: `pytest -c host-local/bdd/pytest.ini host-local/bdd`. Зависимость — `pytest-bdd 8.1.0` в `.venv` (venv управляется `uv`, `pip` внутри нет: ставить `uv pip install --python .venv/bin/python`), зафиксирована в `host-local/bdd/requirements.txt`, а не в апстримовом `pyproject.toml`. Грабля pytest-bdd: голая строка в декораторе шага сравнивается **буквально**, плейсхолдер требует `parsers.parse(...)` — иначе `StepDefinitionNotFoundError`. Приёмка: 2 сценария зелёные; проверено, что сценарий **краснеет** на ложном утверждении (тест, который не может упасть, ничего не доказывает). Полный прогон: `1 failed, 2449 passed`; падение — `tests/test_clip_pipeline.py::TestGenerateClipMetadata::test_it_runs_once_per_clip_with_that_clip_s_title`, воспроизводится один-в-один с `-p no:pytest-bdd`, то есть **предшествует** новой зависимости и принадлежит апстримовому тесту. **Открытый вопрос:** `host-local/` занесён в `.git/info/exclude`, поэтому весь слой сценариев не версионируется — при чистке рабочего дерева пропадёт без истории. Решение за человеком (вопрос 5).
 
 ### D3 `sql-steps` — SQL внутри сценария
 - исполнитель: **агент**
@@ -544,3 +551,9 @@ repowise, `docs/` из 4 файлов, `.env` без `DATABASE_URI`, `openspec/`
 4. **Конфликт конвенций путей.** Session-хук требует планы в
    `Videos/plans`, глобальный CLAUDE.md — в `<project>/.claude/plans/`. План
    положен по второму правилу. Какое главнее?
+5. **`host-local/` в ViralMint не версионируется** (`.git/info/exclude:15`).
+   Туда по вашему же правилу уезжает всё своё — и теперь там лежит слой
+   исполняемых сценариев (D2). Каталог вне git: чистка рабочего дерева
+   сотрёт его без истории, и на другой машине его нет. Убрать строку из
+   exclude и коммитить в ветку `raider-host` (конфликта с апстримом быть не
+   может — каталога у него нет), или оставить локальным осознанно?
