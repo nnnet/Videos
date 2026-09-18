@@ -1,0 +1,37 @@
+.claude/plans/2026-09-19T00-10__claude-global-env-foundation.md
+  s_c2f4086715ffb6::t_52c26734100a8e 221-225,231-234,243-245
+  s_c2f4086715ffb6::t_0d9278862bd907 349
+  s_c2f4086715ffb6::t_42229fae55535e 192
+  s_c2f4086715ffb6::t_f736d8895ff65c 385
+  s_c2f4086715ffb6::t_730f0ad37b1d1f 554-559
+  s_c2f4086715ffb6::t_c28d1882e9d27a 186,188
+  s_c2f4086715ffb6::t_d0b616200b7592 193
+  s_c2f4086715ffb6::t_d4532fec3bded4 362
+  s_c2f4086715ffb6::t_80de278793b30f 246
+.claude/plans/2026-05-25T01-20__kernel-rollback-6.8.0-111-one-shot.md
+  s_ae21cfaec3f484::t_224df7afadb75b 1-154
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4d054944d240ffb3ac484588de74ec69f4bce644",
+  "prompts": {},
+  "sessions": {
+    "s_ae21cfaec3f484": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fc01bdea-d71d-4efc-af9c-122e1c2cafc0",
+        "model": "unknown"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    },
+    "s_c2f4086715ffb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e66635e-315f-45ed-a57a-c66feb2a16e2",
+        "model": "claude-opus-5"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
