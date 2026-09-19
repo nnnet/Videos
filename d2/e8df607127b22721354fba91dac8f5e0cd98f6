@@ -1,0 +1,19 @@
+a.txt
+  s_c2f4086715ffb6::t_b01e220724ce41 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d2e8df607127b22721354fba91dac8f5e0cd98f6",
+  "prompts": {},
+  "sessions": {
+    "s_c2f4086715ffb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e66635e-315f-45ed-a57a-c66feb2a16e2",
+        "model": "claude-opus-5"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
