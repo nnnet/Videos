@@ -29,6 +29,15 @@ YouTube video downloading and management pipeline with FTP sync to a mobile devi
 - `docker` (for Whisper transcription)
 - Firefox (for cookie extraction)
 
+## Specs first (gate)
+
+- `openspec/specs/<cap>/spec.md` — требования `### Requirement: REQ-<cap>-NNN …`;
+  `bdd/features/*.feature` — сценарий с тегом `@REQ-<id>` над `Сценарий:`.
+- Любая новая работа начинается с требования и сценария, код — после.
+  pre-commit гейт (`agent-ops spec-coverage .`) остановит коммит, трогающий
+  `openspec/specs/` или `bdd/features/`, пока они расходятся.
+- Проверка: `agent-ops spec-coverage .`, `pytest -c bdd/pytest.ini bdd`.
+
 ## Common Commands
 
 ```bash

@@ -1,0 +1,8 @@
+# Зависимости слоя исполняемых сценариев. Держатся здесь, а не в
+# pyproject.toml проекта — см. комментарий в pytest.ini.
+#
+# Ставятся бутстрапом agent-ops (медленная полоса) в .venv проекта, если он
+# есть, иначе в пользовательский site-packages. Вручную:
+#   python3 -m pip install --user -r bdd/requirements.txt
+pytest>=8
+pytest-bdd>=8.1,<9

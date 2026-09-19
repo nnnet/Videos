@@ -84,6 +84,9 @@ graph:
   # O. полуавтоматическое пополнение
   - {id: O1, needs: [],   parallel: "",      status: "[x]", files: [~/.agent-ops/bin/agent-harvest, ~/.agent-ops/bootstrap/templates/docs/_leaf-template.md]}
   - {id: O2, needs: [O1], parallel: "",      status: "[x]", files: [~/.agent-ops/bin/agent-harvest]}
+  # Q. резервирование (заказ пользователя 22:00)
+  - {id: Q1, needs: [],   parallel: "",      status: "[x]", files: [~/.agent-ops/bin/agent-backup, ~/.agent-ops/systemd/**, ~/.agent-ops/tests/backup-verify.sh, ~/.agent-ops/bin/agent-ops, ~/.agent-ops/docs/backup.md, bdd/features/project-baseline.feature]}
+  - {id: Q2, needs: [],   parallel: "",      status: "[x]", files: [~/.agent-ops/git-hooks/dispatcher, ~/.agent-ops/bootstrap/templates/CLAUDE.md, ~/.agent-ops/tests/precommit-gate-verify.sh, CLAUDE.md]}
 ```
 
 ### Состояние исполнения
@@ -133,6 +136,16 @@ J1/J2 отменены — их цель закрыта группой P. K3 р�
 - выход: `agent-ops doctor` дополнительно: каждый `command` из `~/.claude/settings.json` (`hooks.*`) существует и исполняем; `core.hooksPath` указывает на наш диспетчер; таймер `agent-nightly.timer` активен; каждая БД реестра открывается и имеет таблицу `events`; `~/.claude/CLAUDE.md` ссылается на существующие листы.
 - приёмка: подложить в settings.json хук на несуществующий файл → `doctor` красный с именем файла; убрать → зелёный.
 - заметки: ровно этот класс дефекта (rtk) жил незамеченным; проверка стоит секунду. **Сделано 18:15:** 5 секций в `cmd_doctor` (хуки claude по `$CLAUDE_SETTINGS`, `core.hooksPath` + диспетчер без `repowise-hook-start`, таймер, БД реестра read-only со снапшотом как в `agent-q`, ссылки `~/.claude/CLAUDE.md` → `docs/claude/`); `tests/doctor-verify.sh` 15/15; живой doctor 45/45. Эвристика: листом считается только `[a-z0-9-]+\.md` в бэктиках (иначе `HANDOFF.md` красил бы). `CLAUDE_SETTINGS`/`CLAUDE_MD` — дефолты внутри `cmd_doctor`, в `config.sh` не вынесены.
+
+### Q1 `backup-4h` — remote для платформы и бэкап каждые 4 часа
+- выход: приватный `github.com/nnnet/.agent-ops` (origin `~/.agent-ops`, ветка `master`); `bin/agent-backup [--no-push]`: копия `.repowise-workspace.yaml` → `backups/`, `.dump` `events.db` активных проектов → `backups/<name>/events.sql`, `repowise decision list --format json` → `decisions.json`, коммит+пуш `~/.agent-ops`, коммит+пуш `~/.claude` (rebase при расхождении, `exit 0` всегда); `systemd/agent-backup.{service,timer}` (`00/4:00`, Persistent) + копия в `~/.config/systemd/user/`; `doctor`: обе таймера, remote платформы, итог последнего прогона; `docs/backup.md`.
+- приёмка: `tests/backup-verify.sh` 14/14; первый боевой прогон — 4 проекта + workspace в origin; `git rev-list origin/master..master` = 0, `git -C ~/.claude rev-list origin/main..main` = 0; `systemctl --user list-timers` показывает `agent-backup.timer`.
+- заметки: шаблон бутстрапа править не пришлось — `project-baseline.feature` с тегом там уже был, Videos бутстрапился раньше; файл добавлен в Videos руками (не закоммичен). Событие о бэкапе в журнал не пишется намеренно (иначе каждый снимок отличался бы от предыдущего). Первый пуш `~/.claude` (12 МБ пак, 3 неотправленных коммита с 24.08 — хук на `/clear` не пушил) упёрся в таймаут 120 с и «Connection closed» от GitHub; ручной повтор — 11 с; таймаут поднят до 300 с. wiki.db не бэкапится.
+
+### Q2 `spec-gate-precommit` — спеки по умолчанию
+- выход: блок 1б в `git-hooks/dispatcher`: pre-commit в репозитории с `openspec/` и `bdd/features/`, если в индексе есть файлы `openspec/specs/` или `bdd/features/`, зовёт `agent-ops spec-coverage`; код 1 → коммит остановлен с причиной; timeout/код 2 → пропуск; обход `AGENT_OPS_SKIP_GATE=1`. Правило «сначала требование и сценарий» — в шаблоне CLAUDE.md и в CLAUDE.md Videos (у него свой файл, шаблон не применялся).
+- приёмка: `tests/precommit-gate-verify.sh` 7/7 (сходятся / без сценария остановлен / чужой файл в индексе проходит / обход / сценарий добавлен / без bdd).
+- заметки: ViralMint не задет — там openspec без `bdd/`. Гейт смотрит рабочее дерево, не индекс.
 
 ### J4 `nightly-selfcheck` — платформа проверяет себя ночью
 - выход: `agent-nightly` в начале прогона зовёт `doctor` и `bootstrap-verify`; результат — событие `nightly.selfcheck` (`ok`/`fail`, список красных) в журнал Videos (первичный проект); красный selfcheck прерывает `--apply`.
