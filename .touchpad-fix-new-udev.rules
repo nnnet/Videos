@@ -1,0 +1,20 @@
+# /etc/udev/rules.d/70-elan-31fd-runtime-pm.rules
+#
+# ROOT-CAUSE fix для ELAN 04F3:31FD touchpad на MSI Raider 18 HX AI A2XWJG.
+#
+# Проблема: Intel LPSS I2C controller (0000:80:15.0) уходит в runtime
+# suspend по таймеру TLP. На MSI Raider BIOS E1824IMS.30C проснуться
+# через ACPI он не успевает в 100us (нарушает spec, 250us). I2C bus
+# timeout -> HID descriptor читается неполным -> kernel не определяет
+# группу MT_WIN8 -> fallback на hid-generic вместо hid-multitouch ->
+# тачпад теряет multitouch и клик.
+#
+# Решение: запретить runtime PM на трёх узлах цепочки. Контроллер
+# остаётся всё время active -> bus не таймаутит -> устройство не теряется.
+#
+# Это штатный механизм ядра (sysfs power/control="on"), не watchdog.
+# Откат: rm этот файл + udevadm control --reload-rules.
+
+ACTION=="add", SUBSYSTEM=="pci", KERNEL=="0000:80:15.0", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="i2c", KERNEL=="i2c-CUST0001:00", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="hid", KERNEL=="0018:04F3:31FD.*", ATTR{power/control}="on"

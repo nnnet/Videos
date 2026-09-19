@@ -1,0 +1,19 @@
+[Unit]
+Description=Register ELAN 04F3:31FD device ID with hid-multitouch driver
+Documentation=https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-bus-pci
+After=systemd-modules-load.service
+DefaultDependencies=no
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Ensure module is loaded, then register device ID. Both echos guarded with -e
+# so service fails clean if sysfs path missing (driver not built).
+ExecStartPre=/sbin/modprobe hid_multitouch
+ExecStart=/bin/sh -c 'test -w /sys/bus/hid/drivers/hid-multitouch/new_id && echo "0018 04F3 31FD" > /sys/bus/hid/drivers/hid-multitouch/new_id'
+# Idempotent — повторный echo same id вернёт EEXIST, мы это глотаем
+SuccessExitStatus=0 17
+
+[Install]
+WantedBy=sysinit.target

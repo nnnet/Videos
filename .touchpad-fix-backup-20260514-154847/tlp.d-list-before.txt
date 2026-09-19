@@ -1,0 +1,5 @@
+total 8
+drwxr-xr-x 1 nobody nogroup   44 ноя  2  2025 .
+drwxr-xr-x 1 nobody nogroup 5698 мая 12 17:50 ..
+-rw-r--r-- 1 nobody nogroup  166 ноя 25  2023 00-template.conf
+-rw-r--r-- 1 nobody nogroup  379 ноя 25  2023 README

@@ -174,7 +174,7 @@ graph:
   - {id: A1, needs: [],           parallel: "foundation", status: "[x]", files: [~/.agent-ops/**]}
   - {id: A2, needs: [],           parallel: "foundation", status: "[x]", files: [~/.local/bin/duckdb]}
   - {id: A3, needs: [],           parallel: "foundation", status: "[x]", files: [~/.claude.json]}
-  - {id: A4, needs: [],           parallel: "foundation", status: "[!]", files: [~/.claude/settings.json]}
+  - {id: A4, needs: [],           parallel: "foundation", status: "[x]", files: [~/.claude/settings.json]}
 
   # B. событийный слой
   - {id: B1, needs: [A1],         parallel: "events",     status: "[x]", files: [~/.agent-ops/sql/events.ddl.sql]}
@@ -184,7 +184,7 @@ graph:
 
   # C. дерево документов
   - {id: C1, needs: [A1],         parallel: "docs",       status: "[x]", files: ["<repo>/.repowise/config.yaml", ~/.claude/settings.json, ~/.agent-ops/bin/repowise-mcp-here]}
-  - {id: C2, needs: [A1],         parallel: "docs",       status: "[ ]", files: [~/.claude/CLAUDE.md, ~/.agent-ops/docs/**]}
+  - {id: C2, needs: [A1],         parallel: "docs",       status: "[x]", files: [~/.claude/CLAUDE.md, ~/.agent-ops/docs/**]}
   - {id: C3, needs: [A1],         parallel: "docs",       status: "[x]", files: [~/.agent-ops/bootstrap/templates/docs/**, ~/.agent-ops/bin/agent-ops]}
 
   # D. executable SDD (пилот ViralMint)
@@ -197,20 +197,20 @@ graph:
   # E. control center
   - {id: E1, needs: [A1],         parallel: "",           status: "[x]", files: [/mnt/82A23910A2390A65/.repowise-workspace.yaml]}
   - {id: E2, needs: [E1],         parallel: "",           status: "[x]", files: [~/.agent-ops/skills/borrow/**, ~/.claude/skills/borrow]}
-  - {id: E3, needs: [],           parallel: "",           status: "[!]", files: [~/.config/herdr/config.toml]}
+  - {id: E3, needs: [],           parallel: "",           status: "[x]", files: [~/.config/herdr/config.toml]}
 
   # F. пополнение дерева
   - {id: F1, needs: [C1],         parallel: "",           status: "[x]", files: ["<repo>/.repowise/config.yaml", "<repo>/.git/hooks/post-commit", ~/.agent-ops/git-template/hooks/post-commit]}
   - {id: F2, needs: [A1],         parallel: "harvest",    status: "[-]", files: [~/.agent-ops/memory/**]}
   - {id: F3, needs: [A1, B1, F1], parallel: "",           status: "[x]", files: [~/.agent-ops/bin/agent-harvest, ~/.claude/settings.json, ~/.agent-ops/harvest-tombstones.tsv]}
-  - {id: F4, needs: [],           parallel: "harvest",    status: "[!]", files: [~/.claude/skills/**]}
+  - {id: F4, needs: [],           parallel: "harvest",    status: "[x]", files: [~/.claude/skills/**]}
 
   # G. авто-бутстрап
   - {id: G1, needs: [A1, B1, C3], parallel: "",           status: "[x]", files: [~/.agent-ops/bootstrap/init-project.sh, ~/.agent-ops/bin/agent-ops]}
   - {id: G2, needs: [G1, B2],     parallel: "wire",       status: "[x]", files: [~/.claude/hooks/session-start.sh]}
   - {id: G3, needs: [G1, E1],     parallel: "wire",       status: "[x]", files: [~/.agent-ops/bin/agent-nightly, ~/.config/systemd/user/agent-nightly.*, ~/.agent-ops/log/**]}
   - {id: G4, needs: [G1],         parallel: "wire",       status: "[x]", files: [~/.agent-ops/git-template/**, ~/.agent-ops/bin/agent-event, ~/.agent-ops/bootstrap/init-project.sh]}
-  - {id: G5, needs: [G2, G3, G4], parallel: "",           status: "[ ]", files: [~/.agent-ops/tests/**]}
+  - {id: G5, needs: [G2, G3, G4, I1], parallel: "",       status: "[x]", files: [~/.agent-ops/tests/**]}
   - {id: G6, needs: [G4],         parallel: "",           status: "[x]", files: [~/.agent-ops/git-hooks/**, ~/.gitconfig, ~/.agent-ops/git-template/hooks/post-commit]}
 
   # H. узлы из ответов пользователя 2026-09-19
@@ -219,38 +219,27 @@ graph:
   - {id: H3, needs: [F1],         parallel: "cleanup",    status: "[x]", files: ["<repo>/.repowise/decisions"]}
   - {id: H4, needs: [G1],         parallel: "cleanup",    status: "[x]", files: [~/.agent-ops/bin/agent-ops, ~/.agent-ops/bootstrap/init-project.sh]}
   - {id: H5, needs: [],           parallel: "cleanup",    status: "[x]", files: [~/.config/git/ignore]}
+
+  # I. узлы из ревью отчёта 2026-09-19 16:30
+  - {id: I1, needs: [B3],         parallel: "",           status: "[x]", files: [~/.agent-ops/bin/agent-q]}
+  - {id: I2, needs: [],           parallel: "",           status: "[x]", files: [~/.claude/settings.json, ~/.claude/CLAUDE.md, ~/.claude/hooks/rtk-rewrite.sh]}
+  - {id: I3, needs: [],           parallel: "",           status: "[x]", files: ["<Videos>/plans/**", "<Videos>/.claude/plans/**"]}
+  - {id: I4, needs: [G6],         parallel: "",           status: "[x]", files: [~/.gitconfig, ~/.agent-ops/git-template/**, ~/.agent-ops/git-hooks/dispatcher, ~/.agent-ops/tests/bootstrap-verify.sh]}
+  - {id: I5, needs: [C2],         parallel: "",           status: "[x]", files: [~/.claude/hooks/post-compact-resume.sh]}
 ```
 
 Зона `<repo>/.repowise/config.yaml` общая у **C1 и F1** → строго
 последовательно, F1 после C1, иначе второй перезапишет вердикты первого.
 
-### Состояние исполнения на 2026-09-19
+### Состояние исполнения
 
-Закрыто восемнадцать узлов: **A1, A2, A3, B1, B2, B3, B4, C1, C3, D1, D2,
-D3, D4, D5, F1, G1, G2, G4**. Событийный слой работает на живых данных этой сессии;
-progressive disclosure включён в трёх проиндексированных репозиториях;
-шаблон дерева документов разворачивается и проверяется гейтом; сценарии
-ViralMint исполняются, ходят в SQL и краснеют на лжи; бутстрап
-идемпотентен, укладывается в бюджет хука, вызывается на старте каждой
-сессии и на первом коммите нового репозитория.
-
-Свободны сейчас (`needs` закрыты):
-
-| Узел | Исполнитель | Запущен? |
-|---|---|---|
-| F3 `nightly` | агент | нет — следующий; зависимости F1 и B1 закрыты |
-| C2 `claudemd-split` | агент | нет — трогает `~/.claude/CLAUDE.md`, файл человека; только диффом и после явного «да» |
-| F2 `memory-fix` | агент | нет — ждёт ответа на вопрос 3 (чинить память или убрать как мёртвую) |
-| A4 `effort` | человек `[!]` | бюджетное решение |
-| E1 `workspace-init` | человек `[!]` | нужен состав списка и «да» на смету |
-| E3 `herdr-layout` | человек `[!]` | интерактивный TUI |
-| F4 `skills-revive` | человек `[!]` | бюджет стартового контекста |
-
-Незапущенных без причины нет.
-
-Ждут рестарта сессии (правка применяется только при старте): приёмка
-**A3** (postgres MCP больше не поднимается) и замена `repowise` MCP на
-обёртку из **C1**.
+Статус живёт **только** в YAML выше (прежняя прозаическая сводка здесь
+протухла — говорила «18 закрыто», когда YAML показывал 28 — и удалена
+2026-09-19 16:40 как нарушение правила «одна отметка — один дифф»).
+2026-09-19 17:30: пользователь дал «да» на A4/C2/E3/F4 — все четыре
+закрыты; добавлены и закрыты I2–I5 (rtk, каталог планов, снятие
+init.templateDir, хук resume). Открытых узлов нет. Продолжение — отдельный
+план `2026-09-19T17-40__agent-ops-stabilization.md`.
 
 ---
 
@@ -288,7 +277,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 - выход: `mcpServers.postgres` удалён из `~/.claude.json`.
 - приёмка: после рестарта в списке инструментов нет `mcp__postgres__*`, время старта сессии не выросло.
 - действия: правка `~/.claude.json` (Edit), удалить ключ `postgres`. Скрипты `postgres-mcp-from-env` оставить на диске — они написаны правильно и пригодятся, когда появится проект с БД.
-- заметки: обоснование в «Решения». Заодно проверить, нужны ли одновременно три браузерных MCP (`playwright`, `agent-browser`, `browser-mcp`) — они дублируются и стоят контекста на старте; это отдельное решение человека. **Сделано 2026-09-19** через `claude mcp remove postgres -s user` (штатный путь вместо ручной правки JSON). Резерв: `~/.agent-ops-backups/claude.json.bak-A3`, режим 600, **вне git** — содержит auth-токен. Инструкция по точечному возврату: `~/.agent-ops/docs/mcp-postgres-removed.md`. Остаётся 9 глобальных MCP. **Приёмка за человеком: нужен рестарт сессии.**
+- заметки: обоснование в «Решения». Заодно проверить, нужны ли одновременно три браузерных MCP (`playwright`, `agent-browser`, `browser-mcp`) — они дублируются и стоят контекста на старте; это отдельное решение человека. **Сделано 2026-09-19** через `claude mcp remove postgres -s user` (штатный путь вместо ручной правки JSON). Резерв: `~/.agent-ops-backups/claude.json.bak-A3`, режим 600, **вне git** — содержит auth-токен. Инструкция по точечному возврату: `~/.agent-ops/docs/mcp-postgres-removed.md`. Остаётся 9 глобальных MCP. **Приёмка за человеком: нужен рестарт сессии.** **Закрыто 2026-09-19 16:25 в новой сессии:** `mcp__postgres__*` в списке инструментов отсутствует.
 - новая находка: глобальный `repowise` MCP в `~/.claude/settings.json` жёстко привязан к пути ViralMint (`args: ["mcp", ".../ViralMint", ...]`). В любой другой папке он отвечает по **чужой** вики, молча и правдоподобно. Это хуже, чем отсутствие сервера. Лечится либо переводом на per-project `.mcp.json`, либо обёрткой, подставляющей git-корень; отдельный узел не заводился — решить при C1.
 
 ### A4 `effort` — поднять уровень усилий
@@ -296,6 +285,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 - выход: `effortLevel` в `~/.claude/settings.json` поднят с `low`.
 - приёмка: человек подтвердил выбор.
 - заметки: **ждёт человека** — влияет на расход токенов и деньги, агент такое решение за пользователя не принимает. Текущее `low` при модели `opus[1m]` противоречит замаху этого плана: спеки, проекции и архитектурные решения на низком усилии выходят поверхностными. Команда: в `~/.claude/settings.json` заменить `"effortLevel": "low"` на `"medium"` или `"high"`.
+- заметки (2026-09-19 17:12): пользователь: «да». `effortLevel` → `medium` (нижняя из двух предложенных ступеней; `high` — по желанию). Бэкап `~/.agent-ops-backups/settings.json.20260919-1712.bak-effort`.
 
 ### B1 `event-ddl` — схема событий
 - исполнитель: **агент**
@@ -354,7 +344,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
   repowise hook rewrite install          # distill-перезапись шумных команд
   repowise saved                         # сколько это сэкономило
   ```
-- заметки: подкоманды — `install/uninstall/status`, не `on/off`. Отдельный хук ставить не нужно: механизм несёт уже присутствующий в `settings.json` PostToolUse-хук `repowise-augment`; эти команды лишь переключают per-repo вердикт в `.repowise/config.yaml`. Требует, чтобы репо был проиндексирован (`Videos` — да, остальные — узел E1). **Сделано 2026-09-19.** Три вердикта включены в трёх проиндексированных репозиториях: `Videos`, `ViralMint`, `video-wizard` (путь в реестре — `video-wizard`, не `video_wizard`: имя каталога с дефисом, имя проекта с подчёркиванием). `agentkit` и `project2task` пропущены **осознанно** — вики не построена (`.repowise/wiki.db` нет), вердикт без индекса ничего не даёт; включатся узлом E1. Отклонение от плана: `rewrite install` — **не** per-repo, он пишет группу `Bash|PowerShell` в `~/.claude/settings.json` (бэкап `~/.agent-ops-backups/settings.json.bak-C1`) и попутно создаёт `AGENTS.md` в текущем репо (в `Videos` — новый файл на 12 строк, не симлинк, апстрима у него нет). Хук codex не встал и не встанет: Codex 0.117.0 < 0.137, сам инструмент так и сказал. **Побочно закрыта находка про MCP:** вместо привязки к пути ViralMint в `settings.json` теперь `~/.agent-ops/bin/repowise-mcp-here` — обёртка, вычисляющая git-корень на старте (`git rev-parse --show-toplevel` → `CLAUDE_PROJECT_DIR` → `cwd`). Рукопожатие MCP проверено из `video-wizard`. Приёмка самой замены — **после рестарта сессии**, как и A3.
+- заметки: подкоманды — `install/uninstall/status`, не `on/off`. Отдельный хук ставить не нужно: механизм несёт уже присутствующий в `settings.json` PostToolUse-хук `repowise-augment`; эти команды лишь переключают per-repo вердикт в `.repowise/config.yaml`. Требует, чтобы репо был проиндексирован (`Videos` — да, остальные — узел E1). **Сделано 2026-09-19.** Три вердикта включены в трёх проиндексированных репозиториях: `Videos`, `ViralMint`, `video-wizard` (путь в реестре — `video-wizard`, не `video_wizard`: имя каталога с дефисом, имя проекта с подчёркиванием). `agentkit` и `project2task` пропущены **осознанно** — вики не построена (`.repowise/wiki.db` нет), вердикт без индекса ничего не даёт; включатся узлом E1. Отклонение от плана: `rewrite install` — **не** per-repo, он пишет группу `Bash|PowerShell` в `~/.claude/settings.json` (бэкап `~/.agent-ops-backups/settings.json.bak-C1`) и попутно создаёт `AGENTS.md` в текущем репо (в `Videos` — новый файл на 12 строк, не симлинк, апстрима у него нет). Хук codex не встал и не встанет: Codex 0.117.0 < 0.137, сам инструмент так и сказал. **Побочно закрыта находка про MCP:** вместо привязки к пути ViralMint в `settings.json` теперь `~/.agent-ops/bin/repowise-mcp-here` — обёртка, вычисляющая git-корень на старте (`git rev-parse --show-toplevel` → `CLAUDE_PROJECT_DIR` → `cwd`). Рукопожатие MCP проверено из `video-wizard`. Приёмка самой замены — **после рестарта сессии**, как и A3. **Закрыто 2026-09-19 16:25:** новая сессия в `Videos` — repowise MCP отвечает по вики Videos (хук старта показал «index update in progress» именно для этого репозитория), а не по ViralMint.
 
 ### C2 `claudemd-split` — разрезать глобальный CLAUDE.md
 - исполнитель: **агент**, приёмка человеком
@@ -362,6 +352,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 - приёмка: человек подтвердил, что ни одно правило не потерялось; поведение агента в трёх типовых задачах не изменилось.
 - действия: текущие 19.5 КБ грузятся в **каждую** сессию целиком — это анти-progressive по определению. Разделы «Auto-compact protocol», «Compact Instructions», «Формат плана — граф узлов», «Никогда не создавать конфликт с апстримом» уезжают в листья; в CLAUDE.md остаётся строка-указатель на каждый и только то, что нужно всегда.
 - заметки: `Compact Instructions` инжектится авто-компактом через `CLAUDE_COMPACT_RETENTION` — при переносе проверить, что `config.sh` читает новый путь. Трогаем файл человека → диффом, не перезаписью.
+- заметки (2026-09-19 17:35): сделано. Роутер 45 строк; пять листов в `~/.agent-ops/docs/claude/` (auto-compact, plan-files, plan-graph, web-search, upstream-conflicts) + индекс `docs/README.md`; текст перенесён дословно — построчная сверка: 0 пропущенных из 293. Раздел auto-compact ушёл в лист целиком: тексты напоминаний хуков самодостаточны (ARMED несёт формат маркера, TRIGGER — просьбу про `/compact`). `CLAUDE_COMPACT_RETENTION` в config.sh не зависит от CLAUDE.md — проверено. docs-check зелёный. Бэкап `CLAUDE.md.20260919-1730.bak-C2`. Приёмка «поведение в трёх типовых задачах не изменилось» — за пользователем.
 
 ### C3 `docs-template` — шаблон дерева документов
 - исполнитель: **агент**
@@ -467,6 +458,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 - выход: раскладка herdr: панель на активный проект, панель с `agent-q -p session-timeline`, панель с дашбордом ouroboros.
 - приёмка: `herdr` поднимает раскладку одной командой.
 - заметки: **ждёт человека** — TUI настраивается интерактивно, агент вслепую раскладку не подберёт. Полезные подкоманды: `herdr workspace`, `herdr tab`, `herdr pane`, `herdr agent`, `herdr integration`. Хук `herdr-agent-state.sh` уже пишет состояние сессии — раскладке есть что показывать.
+- заметки (2026-09-19 17:25): сделано как `agent-ops herdr-layout [dir]` (`bin/agent-herdr-layout`, коммит 6f35ab9). Socket-API herdr открывает в панели только оболочку, печатать в неё нельзя — команда доезжает через `--env AGENT_OPS_PANE_CMD`, который выполняет блок agent-ops в `~/.bashrc` (бэкап `bashrc.20260919-1720.bak-E3`). Раскладка: проект | `agent-q -p session-timeline` под watch 15 с | `ouroboros tui`. Проверено на workspace Videos: обе панели с командами. `config.toml` не тронут — раскладка не декларативная, а вызов API.
 
 ### F1 `decision-sync` — захват решений заработал
 - исполнитель: **агент**
@@ -517,6 +509,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 - выход: 3-5 скиллов возвращены из `~/.claude/skills-disabled/` в `~/.claude/skills/`.
 - приёмка: скиллы видны в листинге, стартовый бюджет контекста не пробит.
 - заметки: **ждёт человека** — 102 скилла лежат отключёнными, и включение расходует стартовый контекст, это ваш бюджетный выбор. Прямо относятся к плану: `bmad-create-prd` (продуктовые требования для пункта 1), `bmad-eval-runner` (прогон оценок), `bmad-document-project` (первичное наполнение дерева). Возврат: `mv ~/.claude/skills-disabled/<name> ~/.claude/skills/`. Учтите, что ak-плагин уже даёт 112 скиллов и часть функций дублируется — возможно, достаточно `ouroboros:pm` вместо `bmad-create-prd`.
+- заметки (2026-09-19 17:12): пользователь: «да». Возвращены три из заметки: `bmad-create-prd`, `bmad-eval-runner`, `bmad-document-project` (`mv` из `skills-disabled/`). Бюджет старта — за пользователем смотреть по факту.
 
 ### G1 `bootstrap-script` — идемпотентный инициализатор
 - исполнитель: **агент**
@@ -535,7 +528,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 ### G3 `nightly-catchup` — догоняющий режим
 - исполнитель: **агент**
 - выход: `~/.agent-ops/bin/agent-nightly` + расписание.
-- приёмка: за один ночной прогон непроиндексированный проект из registry получает вики и попадает в workspace.
+- приёмка (переформулирована 2026-09-19 16:40, прежняя противоречила решению ограничиться тремя репозиториями): непроиндексированные проекты реестра показаны в отчёте с готовой командой; индексация не запускается без белого списка `.repowise-workspace.yaml`; прогон без `--apply` ничего не тратит.
 - действия: обход `registry.tsv`, для отстающих — `repowise init`/`sync`, `decision` harvest, пересборка `control.duckdb`. Расписание: `CronCreate` либо systemd-timer.
 - заметки: сюда уносится всё дорогое, чтобы старт сессии оставался мгновенным. Ночной прогон тратит деньги на LLM — включать после согласования сметы в E1.
 
@@ -566,9 +559,9 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 
 ### G5 `bootstrap-verify` — приёмка всей схемы
 - исполнитель: **агент**, финальная приёмка человеком
-- выход: тест в `~/.agent-ops/tests/`, прогоняющий бутстрап на чистой временной папке и на ViralMint.
-- приёмка: все критерии из «Критерии приёмки плана в целом» выполняются; повторный прогон идемпотентен.
-- заметки: обязательно проверить деградацию — что происходит при отсутствии duckdb, при непроиндексированном репо, при отсутствии сети. Бутстрап, ломающий сессию в самолёте, хуже отсутствующего.
+- выход: тест в `~/.agent-ops/tests/`, прогоняющий бутстрап на чистых временных репозиториях и на `Videos` (ViralMint исключён запретом от 2026-09-19).
+- приёмка: `bash ~/.agent-ops/tests/bootstrap-verify.sh` зелёный: detect не пишет на диск и ≤8 строк; safe-auto создаёт `.agent/`, docs-скелет, exclude и проходит `docs-check`; повторный прогон идемпотентен; деградация без duckdb и в `env -i` — exit 0; `agent-q` читает БД из каталога без права записи (кейс песочницы, узел I1); Videos detect exit 0.
+- заметки: обязательно проверить деградацию — что происходит при отсутствии duckdb, при непроиндексированном репо, при отсутствии сети. Бутстрап, ломающий сессию в самолёте, хуже отсутствующего. **Сделано 2026-09-19 16:40**: 15 проверок, 15 зелёных. Грабля, найденная приёмкой: duckdb в `.mode csv` завершает строки **CRLF** — в bash сравнение `"1"` с `$'1\r'` молча ложно, а терминал `\r` прячет; ручной репро «проходил», тест падал. Всем потребителям `agent-q --csv` резать `\r`.
 
 ### G6 `hooks-dispatcher` — хуки во всех репозиториях, а не только в новых
 - исполнитель: **агент**
@@ -599,7 +592,7 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 - **Порядок соблюдён: сначала доказали, что `agent-browser` живой.** `doctor` (10 pass / 0 fail) сам по себе ничего не доказывает, поэтому был живой прогон: открыть example.com → `browserLaunched: true`, снять текст `h1` → «Example Domain» → закрыть. Только после этого удаление.
 - **Ошибка в моей постановке, которую агент поймал:** в приёмку я записал «должно остаться шесть серверов», хотя 9 − 2 = 7. Агент не стал подгонять факт под приёмку и не удалил третий сервер ради красивой цифры — это правильное поведение, удалять сверх названного пользователем он не имел права.
 - Восстановление проверено round-trip'ом на одноразовой копии с подменённым `HOME`, живой конфиг при тесте не затронут: `claude mcp add-json <имя> "$(cat ~/.agent-ops-backups/mcp/<имя>.json)" -s user`. Полный бэкап `~/.agent-ops-backups/claude.json.20260919-152326.bak`. В обоих сохранённых конфигах `env` пуст — секретов в них нет.
-- открытый хвост: `~/.claude.json` пишется живой сессией Claude Code. Запись была атомарной (`tempfile` + `os.replace`), но параллельный процесс с ранее прочитанным снимком может вернуть удалённые ключи. **Сверить `mcpServers` после перезапуска сессии.**
+- открытый хвост: `~/.claude.json` пишется живой сессией Claude Code. Запись была атомарной (`tempfile` + `os.replace`), но параллельный процесс с ранее прочитанным снимком может вернуть удалённые ключи. **Сверить `mcpServers` после перезапуска сессии.** **Сверено 2026-09-19 16:25:** ровно 7 (`agent-browser, context7, headroom, keenable, process_triage, repowise, serena`), удалённые не вернулись.
 - открытый хвост: `browser-mcp` был единственным, кто умеет работать в живом Chrome пользователя с его логинами; `agent-browser` эту нишу не закрывает. Зафиксировано в README бэкапа — если понадобится работа с авторизованными сессиями в своём браузере, восстанавливать именно его.
 
 ### H2 `claudemd-plans-path` — снять конфликт конвенций путей
@@ -646,7 +639,33 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
   Правило в `.git/info/exclude`, которое пишет бутстрап, теперь избыточно — но оставлено: оно работает на машине без этого глобального файла, а дублирование здесь безвредно.
   Бэкап: `~/.agent-ops-backups/git-global-ignore.bak-H5`.
 
+### I1 `sandbox-attach` — SQL-плоскость доступна из песочницы
+- исполнитель: **агент**
+- выход: `snap_db()` в `~/.agent-ops/bin/agent-q`.
+- приёмка: sandboxed-вызов `agent-q "select project, count(*) from all_events group by 1"` даёт строки по всем источникам; `agent-ops doctor` из песочницы — «проблем 0»; число временных каталогов после вызова не растёт.
+- заметки: заведён ревью отчёта 2026-09-19 16:25. **Запись G3 «дефект agent-q не подтвердился» была неверной**: агент G3 и оркестратор проверяли в разных условиях. В песочнице Claude Code (дефолт Bash-инструмента) `ATTACH` любой WAL-базы падал «unable to open database file» — SQLite обязан создать `-shm`/`-wal` рядом с файлом даже для чтения, а песочница запись вне allowlist запрещает. Итог: главный потребитель платформы, агент, не мог пользоваться SQL-плоскостью без `dangerouslyDisableSandbox`. **Сделано 2026-09-19 16:35.** Решение: реальная проба записи в каталог БД (права по битам о песочнице не знают); при отказе — копия db+wal+shm во временный каталог, ATTACH копии, WAL доигрывается штатной recovery. Первая версия через `$(snap_db ...)` **утекала**: подстановка — subshell, `SNAP_DIR` не доходил до cleanup-ловушки, каждый источник плодил свой каталог; переделано на глобальную переменную, `--sources` — без pipe по той же причине. Приёмка из песочницы: 4 источника (viralmint 2630, ouroboros 1854, video_wizard 1373, videos 762), `doctor` 22/0, tmp-записей 562 → 562.
+
 ---
+
+### I2 `rtk-removed` — снять мёртвый rtk
+- выход: хук `rtk-rewrite.sh` убран из `settings.json`, `@RTK.md` убран из `CLAUDE.md`; файлы в `~/.agent-ops-backups/rtk/`.
+- приёмка: `grep -c rtk ~/.claude/settings.json ~/.claude/CLAUDE.md` → 0/0; settings.json валидный JSON.
+- заметки: бинарь `rtk` лежал только в `~/.headroom/bin/` (снятый headroom) и в PATH сессий не попадал — хук на каждый Bash-вызов печатал warning и выходил нулём, `@RTK.md` грузил ~1 КБ инструкций про несуществующую команду. Решение пользователя 2026-09-19 17:00. Бэкапы `settings.json.20260919-1705.bak-rtk`, `CLAUDE.md.20260919-1705.bak-rtk`.
+
+### I3 `plans-dir-unified` — один каталог планов в Videos
+- выход: оба плана из `.claude/plans/` перенесены в `plans/` (`git mv`), `.claude/plans/` удалён; ссылки в отчётах и HANDOFF обновлены.
+- приёмка: `ls .claude/plans` → нет каталога; `grep -rn '.claude/plans' plans/reports` — только исторические упоминания.
+- заметки: решение пользователя «все в ./plans» 2026-09-19 17:00.
+
+### I4 `templatedir-removed` — снять `init.templateDir`
+- выход: `git config --global --unset init.templateDir`; `~/.agent-ops/git-template/` удалён из репо; cmp-ветка в диспетчере убрана; `git-template` исключён из `doctor`.
+- приёмка: `git config --global --get init.templateDir` пусто; `git init` даёт стандартные `.sample`-хуки и `info/exclude`; `bootstrap-verify` 15/15 и в песочнице, и вне её.
+- заметки: копии шаблонного `post-commit` в старых `.git/hooks` видят `AGENT_OPS_DISPATCHED` и свою часть пропускают — дублей нет. Вне песочницы тест падал на «диск не тронут»: `git` в PATH — шим `git-ai`, создаёт `.git/ai/` при первом вызове; исключено из подсчёта. Коммит e17a1bd.
+
+### I5 `resume-hook-plans-path` — хук resume знает оба каталога планов
+- выход: `~/.claude/hooks/post-compact-resume.sh` — строка рехидрации называет `<project>/plans/` или `.claude/plans/`.
+- приёмка: `bash -n` чист; `diff` с бэкапом — одна строка.
+- заметки: тот же дефект, что был в «Compact Instructions»; найден при C2. Бэкап `post-compact-resume.sh.20260919-1730.bak-C2`.
 
 ## Приложение: факты инспекции, на которых стоит план
 
@@ -747,6 +766,12 @@ repowise; удаление `.repowise/` унесёт их с собой — пр
 
 **Задача сессии сужена до одного: оптимизировать работу Claude Code.**
 Всё, что относится к чужим кодовым базам, из области работы выведено.
+
+**Снято пользователем 2026-09-19 16:30 («забудь совсем»): `agentkit`,
+`project2task`, `headroom`.** Не индексировать, не предлагать, узлов не
+заводить. В `registry.tsv` оба проекта переведены в `detect/no` — они
+исчезли из SQL-плоскости, ночного отчёта и nag-строк бутстрапа. Хвост про
+`ANTHROPIC_BASE_URL` и headroom закрыт без действий.
 
 ## Нерешённые вопросы
 
