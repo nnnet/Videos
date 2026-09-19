@@ -1,0 +1,41 @@
+plans/2026-09-19T17-40__agent-ops-stabilization.md
+  s_62fee87b926c16::t_924a6f84addb94 83,195
+  s_62fee87b926c16::t_971efce0e746ef 91-92
+  s_62fee87b926c16::t_0acabb6b059dc6 106-118,120-127,129-130
+  s_62fee87b926c16::t_dfe2b72080c19f 68,140
+  s_62fee87b926c16::t_644f7965520e92 81,185
+  s_62fee87b926c16::t_b7f4f4f617b9a7 39-48,52-53
+  s_62fee87b926c16::t_bcf9b4c3669577 67,135
+  s_62fee87b926c16::t_9979b12e907e58 75,165
+  s_62fee87b926c16::t_475d35e16870ee 78,175
+  s_62fee87b926c16::t_d0fdcbc40f1ccc 72,79,155,180
+  s_62fee87b926c16::t_8733f65d4adc2c 119
+  s_62fee87b926c16::t_885cf166e4c23c 76
+  s_62fee87b926c16::t_73d0ca9cd32b2c 82,190
+  s_62fee87b926c16::t_7f47d55f63ff18 211-212,216-217
+  s_62fee87b926c16::t_12c0f425b1f655 86,205
+  s_62fee87b926c16::t_053799ab72db8f 70,145
+  s_62fee87b926c16::t_91e5bbdd886af2 74,160
+  s_62fee87b926c16::t_ae3091a077df89 93-100,153-154
+  s_62fee87b926c16::t_bf48ea14555cdf 59-63,65-66
+  s_62fee87b926c16::t_34585478bc61f2 71,150,170
+  s_62fee87b926c16::t_c13fe141973b7c 85,200
+docs/_leaf-template.md
+  s_62fee87b926c16::t_c6cf20b6d2bf0a 1,4-14,19,23,27,31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c47dcf7cb5db38b2b8a8610ac530cef9c484824",
+  "prompts": {},
+  "sessions": {
+    "s_62fee87b926c16": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ca3d8ce1-878b-44d1-afc8-b68d62d486b8",
+        "model": "unknown"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
