@@ -208,7 +208,7 @@ graph:
   # G. авто-бутстрап
   - {id: G1, needs: [A1, B1, C3], parallel: "",           status: "[x]", files: [~/.agent-ops/bootstrap/init-project.sh, ~/.agent-ops/bin/agent-ops]}
   - {id: G2, needs: [G1, B2],     parallel: "wire",       status: "[x]", files: [~/.claude/hooks/session-start.sh]}
-  - {id: G3, needs: [G1, E1],     parallel: "wire",       status: "[ ]", files: [~/.agent-ops/bin/agent-nightly]}
+  - {id: G3, needs: [G1, E1],     parallel: "wire",       status: "[x]", files: [~/.agent-ops/bin/agent-nightly, ~/.config/systemd/user/agent-nightly.*, ~/.agent-ops/log/**]}
   - {id: G4, needs: [G1],         parallel: "wire",       status: "[x]", files: [~/.agent-ops/git-template/**, ~/.agent-ops/bin/agent-event, ~/.agent-ops/bootstrap/init-project.sh]}
   - {id: G5, needs: [G2, G3, G4], parallel: "",           status: "[ ]", files: [~/.agent-ops/tests/**]}
   - {id: G6, needs: [G4],         parallel: "",           status: "[x]", files: [~/.agent-ops/git-hooks/**, ~/.gitconfig, ~/.agent-ops/git-template/hooks/post-commit]}
@@ -528,6 +528,14 @@ ViralMint исполняются, ходят в SQL и краснеют на л�
 - приёмка: за один ночной прогон непроиндексированный проект из registry получает вики и попадает в workspace.
 - действия: обход `registry.tsv`, для отстающих — `repowise init`/`sync`, `decision` harvest, пересборка `control.duckdb`. Расписание: `CronCreate` либо systemd-timer.
 - заметки: сюда уносится всё дорогое, чтобы старт сессии оставался мгновенным. Ночной прогон тратит деньги на LLM — включать после согласования сметы в E1.
+
+- **Сделано 2026-09-19** параллельным агентом. Расписание — **systemd user timer**, не `CronCreate`: `Persistent=true` догоняет пропущенный запуск, а машина ноутбучная и ночью выключена — без догона «ночной» прогон не случился бы неделями. Второй довод: расписание живёт в ОС и переживает обновление Claude Code, тогда как `CronCreate` привязал бы ночную работу к харнессу агента. Таймер на 03:30 с `RandomizedDelaySec=15min`, сверено: `NEXT Sun 2026-09-20 03:41:46 MSK`.
+- **Защита от трат многослойная.** Умолчание — отчёт, режим отчёта зашит в `ExecStart` юнита (без `--apply`). Дорогое — только по `.repowise-workspace.yaml` (три репозитория), реестр читается лишь чтобы ПОКАЗАТЬ непроиндексированные и напечатать команду: `repowise init` не запускается никогда. Перед любой индексацией — `agent-ops index-guard`, красный = пропуск репозитория с событием `nightly.repo.skipped`. Смета берётся без траты: `repowise update --dry-run`, `docs_mode` из `state.json` (у videos и video-wizard — `deterministic`, догон вообще без LLM) и факт из `repowise costs`.
+- Приёмка: синтетический «склад данных» (5 под git, 60 вне) → `index-guard КРАСНЫЙ — репозиторий пропущен`; `env -i` без repowise и duckdb → деградирует, код 0; второй параллельный прогон отступает по локу; события видны через `agent-q ... aggregate_type='nightly'`. Независимый прогон оркестратора: 4,4 с, отчёт печатает две команды для человека и итог `$0.2051` за всё время.
+- **Агент отказался закрывать приёмку по букве, и был прав.** Формулировка узла — «за один ночной прогон непроиндексированный проект получает вики и попадает в workspace» — **противоречит решению пользователя** ограничиться тремя уже проиндексированными репозиториями. Прогон доводит до одной команды и останавливается. Приёмку надо переформулировать: «непроиндексированные показаны с готовой командой, индексация не запускается без белого списка». Подгонять факт под устаревшую приёмку было бы ровно тем, против чего заведён узел D4.
+- **Заявленный агентом дефект `agent-q` не подтвердился.** Он сообщил, что при ATTACH печатается `unable to open database file` и `agent-ops doctor` из-за этого считает плоскость нерабочей. Проверено оркестратором: stderr пуст, код 0, кросс-проектный запрос отвечает по четырём источникам (viralmint 2353, ouroboros 1854, video_wizard 1291, videos 704), `doctor` показывает зелёное. Два проекта реестра (`agentkit`, `project2task`) journal-а не имеют и пропускаются штатно — это замысел A2/B3, а не поломка.
+- открытый хвост: в `Videos/.agent/events.db` осталось одно синтетическое `nightly.repo.updated` от проверки ветки `--apply` с подставным `repowise` (реального update и трат не было), плюс моё тестовое `gate.uncovered REQ-TEST-F3` от сквозной проверки F3. **Удалять не стал:** журнал append-only, вычищать из него неудобные записи — значит завести привычку, которая обесценит весь слой. Оба события реально произошли как проверки; при разборе статистики держать в уме.
+- открытый хвост: при включении `--apply` проверить, что repowise находит ключи провайдера в окружении systemd — в юните `Environment=` задаёт только `PATH`.
 
 ### G4 `git-template` — бутстрап до первого запуска агента
 - исполнитель: **агент**
