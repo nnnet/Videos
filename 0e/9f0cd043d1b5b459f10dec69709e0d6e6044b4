@@ -1,0 +1,99 @@
+docs/operations/index.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-25
+plans/reports/general-purpose-260919-1517-mcp-cleanup.md
+  s_c2f4086715ffb6::t_024758f20f2d3f 1-3,5-99
+  s_62fee87b926c16::t_577b397b919ed9 4
+plans/reports/summary-260919-1618-agent-ops-platform.md
+  s_62fee87b926c16::t_a58797beec94ba 201-243
+  s_62fee87b926c16::t_577b397b919ed9 4
+  s_62fee87b926c16::t_3fe842fab8bfee 6-9
+.claude/HANDOFF.md
+  s_62fee87b926c16::t_577b397b919ed9 4
+  s_62fee87b926c16::t_c1cb21d22764e2 1-3
+docs/architecture/overview.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-26
+.gitignore
+  s_c2f4086715ffb6::t_5453da4f7fc8d6 9-15
+plans/2026-09-19T17-40__agent-ops-stabilization.md
+  s_62fee87b926c16::t_82d9769d614704 1-188
+plans/reports/general-purpose-260919-1519-nightly-catchup.md
+  s_c2f4086715ffb6::t_2053dc0d6d6a3c 1-86
+docs/decisions/0000-template.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-26
+docs/architecture/index.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-31
+docs/_leaf-template.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-26
+plans/2026-09-19T00-10__claude-global-env-foundation.md
+  s_62fee87b926c16::t_300fcc98224fbe 177,187,200,206,213,222-228,234,236-242,280,288,347,355,461,512,531,562-564,595,642-647,650-669,770-775
+AGENTS.md
+  s_c2f4086715ffb6::t_81a5592336a88b 1-12
+docs/operations/runbook.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-29
+docs/README.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-40
+docs/decisions/index.md
+  s_62fee87b926c16::t_2d6cc278cae601 1-22
+plans/reports/general-purpose-260919-1518-f3-harvest-ritual.md
+  s_c2f4086715ffb6::t_b68c012f4b2556 1-188
+.memory-optimization.sysctl.conf
+  s_ae21cfaec3f484::t_c59cccd46fcf91 1-23
+.touchpad-fix-backup-20260514-154847/99-elan-touchpad-nowakeup.rules
+  s_ae21cfaec3f484::t_f5d06d2a816192 1-8
+.touchpad-fix-backup-20260514-154847/99-elan-touchpad-rebind.rules
+  s_ae21cfaec3f484::t_1a0f539b12f9bd 1-7
+.touchpad-fix-backup-20260514-154847/boot-grub.cfg.before-rollback-201330
+  s_ae21cfaec3f484::t_ff3cd1205df499 1-321
+.touchpad-fix-backup-20260514-154847/elan-touchpad.conf
+  s_ae21cfaec3f484::t_3559f7abcc271b 1-6
+.touchpad-fix-backup-20260514-154847/etc-default-grub.before-rollback-201330
+  s_ae21cfaec3f484::t_22cf679a3ec722 1-34
+.touchpad-fix-backup-20260514-154847/etc-default-grub.before-step4-210636
+  s_ae21cfaec3f484::t_730252a578fa0c 1-34
+.touchpad-fix-backup-20260514-154847/etc-grub.d-40_custom.before-rollback-201330
+  s_ae21cfaec3f484::t_393cdd42b17b4f 1-5
+.touchpad-fix-backup-20260514-154847/grub.bak
+  s_ae21cfaec3f484::t_f2ecd2df71b080 1-34
+.touchpad-fix-backup-20260514-154847/tlp.conf
+  s_ae21cfaec3f484::t_51060ca874f256 1-607
+.touchpad-fix-backup-20260514-154847/tlp.d-list-before.txt
+  s_ae21cfaec3f484::t_366158f6626793 1-5
+.touchpad-fix-latest-backup
+  s_ae21cfaec3f484::t_aa98ac0a8f7a5b 1
+.touchpad-fix-new-udev.rules
+  s_ae21cfaec3f484::t_bd0caaa2082f6c 1-20
+.touchpad-recorder-script.sh
+  s_ae21cfaec3f484::t_c1553258dc0a4d 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0e9f0cd043d1b5b459f10dec69709e0d6e6044b4",
+  "prompts": {},
+  "sessions": {
+    "s_62fee87b926c16": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ca3d8ce1-878b-44d1-afc8-b68d62d486b8",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    },
+    "s_ae21cfaec3f484": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fc01bdea-d71d-4efc-af9c-122e1c2cafc0",
+        "model": "unknown"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    },
+    "s_c2f4086715ffb6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2e66635e-315f-45ed-a57a-c66feb2a16e2",
+        "model": "claude-opus-5"
+      },
+      "human_author": "nnnet <21066097+nnnet@users.noreply.github.com>"
+    }
+  }
+}
