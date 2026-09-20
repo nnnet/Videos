@@ -1,6 +1,6 @@
 # language: ru
 # Требования из openspec/specs/background-tests/spec.md (change background-tests,
-# hardening). Сценарии всегда задают TEST_STATE_DIR внутри .claude/state/bdd/ —
+# hardening, minors). Сценарии всегда задают TEST_STATE_DIR внутри .claude/state/bdd/ —
 # иначе прогон затёр бы настоящий вердикт и Stop-гейт заблокировал бы агента.
 Функция: Фоновый прогон тестов с вердиктом и Stop-гейтом
 
@@ -39,9 +39,10 @@
   @REQ-background-tests-001
   Сценарий: Второй одновременный запуск отказывается
     Дано репозиторий проекта
-    Когда я выполняю команду "d=.claude/state/bdd/busy; TEST_STATE_DIR=$d TEST_CMD='sleep 3' scripts/test-bg.sh >/dev/null & sleep 1; TEST_STATE_DIR=$d TEST_CMD=true scripts/test-bg.sh; echo second-rc=$?; wait"
+    Когда я выполняю команду "d=.claude/state/bdd/busy; TEST_STATE_DIR=$d TEST_CMD='sleep 3' scripts/test-bg.sh >/dev/null & sleep 1; cp $d/test-result.json $d/saved; TEST_STATE_DIR=$d TEST_CMD=true scripts/test-bg.sh; echo second-rc=$?; echo verdict-same=$(cmp -s $d/saved $d/test-result.json && echo 1 || echo 0); wait"
     Тогда вывод содержит "TESTS BUSY"
     И вывод содержит "second-rc=3"
+    И вывод содержит "verdict-same=1"
 
   @REQ-background-tests-001
   Сценарий: Нечисловой TEST_TIMEOUT — отказ без вердикта
@@ -51,6 +52,35 @@
     И вывод содержит "TESTS REFUSED"
     И вывод содержит "zero-rc=2"
     И вывод содержит "verdict-files=0"
+
+  @REQ-background-tests-001
+  Сценарий: Нет jq — отказ без вердикта
+    Дано репозиторий проекта
+    Когда я выполняю команду "d=.claude/state/bdd/nojq; b=$d/bin; mkdir -p $b; ln -sf $(command -v bash) $b/bash; ln -sf $(command -v dirname) $b/dirname; TEST_STATE_DIR=$d TEST_CMD=true scripts/test-bg.sh >/dev/null; cp $d/test-result.json $d/saved; PATH=$PWD/$b TEST_STATE_DIR=$d TEST_CMD=true scripts/test-bg.sh; echo rc=$?; echo verdict-same=$(cmp -s $d/saved $d/test-result.json && echo 1 || echo 0)"
+    Тогда вывод содержит "TESTS REFUSED"
+    И вывод содержит "rc=2"
+    И вывод содержит "verdict-same=1"
+
+  @REQ-background-tests-001
+  Сценарий: Каталог вердикта недоступен для записи — отказ
+    Дано репозиторий проекта
+    Когда я выполняю команду "d=.claude/state/bdd/ro; mkdir -p $d; chmod u+w $d; TEST_STATE_DIR=$d TEST_CMD=true scripts/test-bg.sh >/dev/null; cp $d/test-result.json $d/saved; if [ $(id -u) = 0 ]; then echo 'skip-root: TESTS REFUSED rc=2 verdict-same=1'; else rm -f $d/test-bg.lock; chmod a-w $d; TEST_STATE_DIR=$d TEST_CMD=true scripts/test-bg.sh; echo rc=$?; chmod u+w $d; echo verdict-same=$(cmp -s $d/saved $d/test-result.json && echo 1 || echo 0); fi"
+    Тогда вывод содержит "TESTS REFUSED"
+    И вывод содержит "rc=2"
+    И вывод содержит "verdict-same=1"
+
+  @REQ-background-tests-001
+  Сценарий: Провал финальной записи даёт FAIL rc=2
+    Дано репозиторий проекта
+    Когда я выполняю команду "d=.claude/state/bdd/final-ro; o=$d.out; mkdir -p $d; chmod u+w $d; if [ $(id -u) = 0 ]; then echo 'skip-root: TESTS FAIL rc=2 wrapper-rc=2 verdict=FAIL:2'; else TEST_STATE_DIR=$d TEST_CMD='chmod a-w .claude/state/bdd/final-ro' scripts/test-bg.sh >$o 2>&1; rc=$?; chmod u+w $d; cat $o; echo wrapper-rc=$rc verdict=$(jq -r --arg s : '.status+$s+(.rc|tostring)' $d/test-result.json); fi"
+    Тогда вывод содержит "TESTS FAIL rc=2"
+    И вывод содержит "wrapper-rc=2 verdict=FAIL:2"
+
+  @REQ-background-tests-001
+  Сценарий: Относительный TEST_STATE_DIR — один файл для обёртки и гейта
+    Дано репозиторий проекта
+    Когда я выполняю команду "d=.claude/state/bdd/rel; (cd bdd && TEST_STATE_DIR=$d TEST_CMD=false ../scripts/test-bg.sh >/dev/null); (cd scripts && echo '{}' | TEST_STATE_DIR=$d ./test-gate.sh | jq -r .decision)"
+    Тогда вывод содержит "block"
 
   @REQ-background-tests-001
   Сценарий: Под pytest без TEST_STATE_DIR обёртка отказывается писать
