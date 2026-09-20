@@ -46,3 +46,17 @@ def _cmd_ok(context):
 def _out_contains(context, text):
     out = context["proc"].stdout
     assert text in out, f"в выводе нет «{text}»: {out[:300]}"
+
+
+@then("команда завершается с ошибкой")
+def _cmd_fails(context):
+    proc = context["proc"]
+    assert proc.returncode != 0, f"команда неожиданно завершилась успешно: {proc.stdout[:300]}"
+
+
+@then(parsers.parse('файл "{rel}" содержит "{text}"'))
+def _file_contains(repo_root, rel, text):
+    path = repo_root / rel
+    assert path.is_file(), f"нет файла {path}"
+    body = path.read_text()
+    assert text in body, f"в {rel} нет «{text}»"
