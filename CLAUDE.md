@@ -41,14 +41,16 @@ YouTube video downloading and management pipeline with FTP sync to a mobile devi
 ## Тесты — только в фоне, только по решению агента
 
 - Запуск: Bash `scripts/test-bg.sh` с `run_in_background: true`; окончания не
-  ждать — harness будит уведомлением; вердикт в `.claude/state/test-result.json`,
-  лог в `.claude/state/test-result.log`.
+  ждать — harness будит уведомлением; вердикт в `.claude/state/test-result.json`
+  (`RUNNING` до конца прогона, затем `PASS`/`FAIL`/`HANG`), лог в
+  `.claude/state/test-result.log`.
 - Реакция по уведомлению: `PASS` → продолжать; `FAIL` → `ak:debug`, фикс,
   перезапуск; `HANG` → найти зависший шаг по логу, таймаут (`TEST_TIMEOUT`,
   600 с) молча не поднимать.
 - Необработанный FAIL/HANG блокирует завершение хода (Stop-хук
-  `scripts/test-gate.sh`); если исправить нельзя — квитировать командой из
-  сообщения хука и объяснить пользователю.
+  `scripts/test-gate.sh`; на `RUNNING`/`PASS` молчит); если исправить нельзя —
+  квитировать командой из сообщения хука и объяснить пользователю. Отладка
+  гейта: `TEST_GATE_DEBUG=1` пишет событие Stop в `.claude/state/last-stop.json`.
 - Никаких хуков автозапуска тестов (на Edit/Write и т.п.). Субагенты и
   `claude -p` тесты в фоне не запускают — harness убивает фон по их финальному
   ответу; им — синхронный `pytest -c bdd/pytest.ini bdd`.

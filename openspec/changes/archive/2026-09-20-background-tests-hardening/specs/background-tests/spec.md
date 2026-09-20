@@ -1,11 +1,6 @@
-# background-tests Specification
+# background-tests — дельта (hardening)
 
-## Purpose
-Фоновый прогон тестов по решению агента: обёртка фиксирует вердикт,
-harness будит агента по завершении, Stop-гейт не даёт молча закончить ход
-с необработанным провалом или зависанием.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: REQ-background-tests-001 Обёртка фиксирует вердикт прогона
 Обёртка `scripts/test-bg.sh` SHALL запускать набор тестов проекта под
@@ -110,23 +105,3 @@ SHALL NOT влиять на решение — идущий прогон вид�
 #### Scenario: Дамп события только в отладке
 - **WHEN** гейт вызван без `TEST_GATE_DEBUG`, затем с `TEST_GATE_DEBUG=1`
 - **THEN** вывод содержит `dump=0` затем `dump=1`
-
-### Requirement: REQ-background-tests-003 Тесты запускаются только по решению агента
-Проект SHALL регистрировать `scripts/test-gate.sh` как хук `Stop` в
-`.claude/settings.json` (точечное добавление ключа `hooks`, остальное
-содержимое файла не меняется и не печатается), и SHALL описывать в
-`CLAUDE.md` правило: тесты запускает только главный агент по своему решению,
-только через `scripts/test-bg.sh` с `run_in_background: true`, без ожидания
-окончания; субагенты и `claude -p` тесты в фоне не запускают (harness
-убивает фон по их финальному ответу); реакция — по уведомлению
-`PASS`/`FAIL`/`HANG`. Настройки проекта SHALL NOT содержать хуков,
-запускающих тесты автоматически (например, `PostToolUse` на `Edit|Write`).
-
-#### Scenario: Гейт зарегистрирован, автозапуска нет
-- **WHEN** выполняется `jq` по `.hooks` из `.claude/settings.json`
-- **THEN** среди команд `hooks.Stop` есть содержащая `scripts/test-gate.sh`
-- **AND** ни одна команда `hooks.PostToolUse` не содержит `test-bg`
-
-#### Scenario: Правило записано в CLAUDE.md
-- **WHEN** агент читает `CLAUDE.md`
-- **THEN** файл содержит `scripts/test-bg.sh` и `run_in_background`

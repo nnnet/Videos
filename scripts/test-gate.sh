@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
 # Stop-хук Claude Code: не даёт закончить ход при необработанном FAIL/HANG от
 # scripts/test-bg.sh. Fail-open: любая ошибка → exit 0; никогда exit 2.
-# На stdout — строго один JSON-объект или ничего.
+# На stdout — строго один JSON-объект или ничего. TEST_GATE_DEBUG=1 — дамп
+# события в <state>/last-stop.json.
+set -u
 command -v jq >/dev/null || exit 0
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd) || exit 0
+cd "$ROOT" || exit 0
 ST="${TEST_STATE_DIR:-$ROOT/.claude/state}"
+ST=$(cd "$ST" 2>/dev/null && pwd) || exit 0
 f="$ST/test-result.json"
 in=$(cat)
-# Сырой вход события — для диагностики (реальные значения background_tasks).
-[ -d "$ST" ] && printf '%s' "$in" >"$ST/last-stop.json" 2>/dev/null
+[ "${TEST_GATE_DEBUG:-0}" != 0 ] && printf '%s' "$in" >"$ST/last-stop.json" 2>/dev/null
 [ -n "$in" ] || exit 0
 printf '%s' "$in" | jq -e . >/dev/null 2>&1 || exit 0
 [ -f "$f" ] || exit 0
 [ -n "$(find "$f" -mmin +"${TEST_RESULT_TTL_MIN:-240}" 2>/dev/null)" ] && exit 0
 # Идёт авто-компакт — глобальный Stop-хук ждёт конца хода с маркером.
 printf '%s' "$in" | jq -e '(.last_assistant_message // "") | test("AUTO-COMPACT-READY")' >/dev/null 2>&1 && exit 0
-# Тесты ещё бегут — побудка придёт от harness, блокировать нечего.
-printf '%s' "$in" | jq -e '(.background_tasks // [])[] | select(.type=="shell"
-  and ((.command // "") | test("scripts/test-bg\\.sh"))
-  and ((.status // "running") | ascii_downcase | test("run|pend|queue|progress")))' >/dev/null 2>&1 && exit 0
+# Пока прогон идёт, обёртка держит вердикт RUNNING — гейт молчит по нему;
+# background_tasks события не разбирается (форма статусов не гарантирована).
 s=$(jq -r '.status // empty' "$f" 2>/dev/null); a=$(jq -r '.acked // false' "$f" 2>/dev/null)
 case "$s" in FAIL|HANG) ;; *) exit 0;; esac
 [ "$a" = true ] && exit 0
